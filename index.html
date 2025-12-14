@@ -3,169 +3,132 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Relationship Graph</title>
+  <title>Top-N Relationship Graph</title>
 
-  <!-- Cytoscape core -->
+  <!-- Cytoscape -->
   <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 
-  <!-- fcose layout -->
-  <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
-
-  <!-- CSV parsing -->
+  <!-- PapaParse for CSV -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    #wrap { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
+    #wrap { display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
     #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
-    #cy { width: 100%; height: 100vh; }
+    #cy { height: 100vh; width: 100%; }
 
-    h2 { margin: 0; }
-    h3 { margin: 12px 0 6px; font-size: 14px; }
-    .hint { font-size: 12px; color: #666; line-height: 1.4; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-
-    .row { display:flex; gap:8px; align-items:center; justify-content: space-between; }
-    .pill {
-      display:inline-block; padding:2px 8px; font-size:12px;
-      border:1px solid #ddd; border-radius:999px; color:#444; white-space: nowrap;
+    .legend { display: grid; gap: 8px; margin-top: 12px; }
+    .legend button {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 10px 10px; border: 1px solid #ddd;
+      background: #fff; border-radius: 10px; cursor: pointer;
+      text-align: left;
     }
-
-    .btnRow { display: grid; gap: 8px; margin-top: 10px; }
-    button.secondary{
-      padding:10px; border:1px solid #ddd; border-radius:10px;
-      background:#fff; cursor:pointer; width: 100%;
-    }
-
-    .legend { display: grid; gap: 8px; margin-top: 8px; }
-    .legend button{
-      display:flex; align-items:center; gap:10px; width:100%;
-      padding:10px; border:1px solid #ddd; background:#fff;
-      border-radius:10px; cursor:pointer; text-align:left;
-    }
-    .legend button.active { outline: 3px solid #000; outline-offset: 2px; }
     .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
 
-    .toggleRow { display:flex; align-items:center; gap:8px; margin-top: 10px; }
-    input[type="checkbox"]{ transform: scale(1.1); }
+    .muted { opacity: 0.12; }
+    .legend button.active { outline: 3px solid #000; outline-offset: 2px; }
 
-    hr { border: none; border-top: 1px solid #eee; margin: 14px 0; }
-
-    .panel {
-      border: 1px solid #eee;
-      border-radius: 10px;
-      padding: 10px;
-      background: #fff;
-      margin-top: 10px;
-      display: grid;
-      gap: 8px;
+    .hint { font-size: 12px; color: #666; line-height: 1.35; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .pill { font-size: 12px; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; color: #444; display:inline-block; }
+    .controls { display: grid; gap: 10px; margin-top: 12px; }
+    .control { display: grid; gap: 6px; }
+    label { font-size: 12px; color: #444; }
+    input[type="range"] { width: 100%; }
+    input[type="text"] {
+      padding: 10px; border: 1px solid #ddd; border-radius: 10px; width: 100%;
+      font-size: 14px;
     }
-    .kv { display:flex; gap:8px; align-items:flex-start; justify-content: space-between; }
-    .kv .k { font-size: 12px; color:#666; }
-    .kv .v { font-size: 12px; color:#111; text-align:right; overflow-wrap:anywhere; }
-
-    .ok { color: #166534; font-weight: 700; }
-    .bad { color: #991b1b; font-weight: 700; }
-
-    .errorBox {
-      margin-top: 10px;
-      padding: 10px;
-      border: 1px solid #f3c2c2;
-      background: #fff5f5;
-      border-radius: 10px;
-      display: none;
+    button.secondary {
+      padding:10px 12px; border-radius:10px; border:1px solid #ddd; background:#fff; cursor:pointer;
     }
-    .errorTitle { font-weight: 700; font-size: 12px; margin-bottom: 6px; }
-    .errorText { font-size: 12px; color: #7a1f1f; white-space: pre-wrap; }
-
-    .small { font-size: 11px; color:#666; }
+    table { border-collapse: collapse; width: 100%; }
+    td { font-size: 12px; padding: 4px 0; vertical-align: top; }
+    td:nth-child(1){ color:#666; width: 62px; }
+    .small { font-size: 12px; color:#666; }
+    .kpi { display:grid; gap:6px; margin-top:8px; }
+    .kpi .pill { width: fit-content; }
   </style>
 </head>
 
 <body>
-<div id="wrap">
-  <aside id="sidebar">
-    <div class="row">
-      <h2>Graph</h2>
-      <span id="counts" class="pill">…</span>
-    </div>
-
-    <p class="hint" style="margin-top:8px;">
-      Top <b>5</b> values per category (by frequency). Click nodes to focus their neighborhood.
-      Shift+Click to multi-select. Click background to clear.
-    </p>
-
-    <div class="btnRow">
-      <button id="fitBtn" class="secondary">Fit</button>
-      <button id="relayoutBtn" class="secondary">Re-layout</button>
-      <button id="spreadBtn" class="secondary">Spread out</button>
-      <button id="clearSelBtn" class="secondary">Clear selection</button>
-      <button id="resetBtn" class="secondary">Reset filters</button>
-    </div>
-
-    <div class="toggleRow">
-      <input id="edgeLabelsToggle" type="checkbox" checked />
-      <label for="edgeLabelsToggle" class="hint" style="margin:0;">Show edge labels (weight + $)</label>
-    </div>
-
-    <div class="panel">
-      <div class="kv">
-        <div class="k">Connection</div>
-        <div class="v" id="connStatus">…</div>
+  <div id="wrap">
+    <aside id="sidebar">
+      <div class="row">
+        <h2 style="margin:0;">Graph</h2>
+        <span id="counts" class="pill">…</span>
       </div>
-      <div class="kv">
-        <div class="k">HTTP</div>
-        <div class="v" id="httpStatus">…</div>
+
+      <p class="hint" style="margin-top:8px;">
+        Loads data from a published Google Sheet (CSV).<br/>
+        Legend filter: click a category to highlight nodes of that column type.<br/>
+        Search: type a value (e.g. <code>agent_11</code>) to show everything linked to it and amount totals.
+      </p>
+
+      <div class="controls">
+        <div class="control">
+          <label for="topN">Top N per category: <span id="topNLabel" class="pill">20</span></label>
+          <input id="topN" type="range" min="5" max="50" step="1" value="20" />
+          <div class="small">Higher N = denser graph.</div>
+        </div>
+
+        <div class="control">
+          <label for="minEdge">Minimum edge weight: <span id="minEdgeLabel" class="pill">1</span></label>
+          <input id="minEdge" type="range" min="1" max="20" step="1" value="1" />
+          <div class="small">Hide weak/coincidental relationships.</div>
+        </div>
+
+        <div class="control">
+          <label for="attrSearch">Find an attribute (exact match)</label>
+          <input id="attrSearch" type="text" list="attrOptions" placeholder="Start typing…" />
+          <datalist id="attrOptions"></datalist>
+          <div class="small">Select a value to highlight its neighborhood + compute amount totals.</div>
+
+          <div class="kpi">
+            <span id="attrSummary" class="pill">No selection</span>
+          </div>
+        </div>
       </div>
-      <div class="kv">
-        <div class="k">Detected headers</div>
-        <div class="v mono" id="headerList">…</div>
+
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap: wrap;">
+        <button id="resetBtn" class="secondary">Reset</button>
+        <button id="fitBtn" class="secondary">Fit</button>
+        <button id="reloadBtn" class="secondary">Reload</button>
+        <button id="clearSearchBtn" class="secondary">Clear search</button>
       </div>
-      <div class="small">
-        Tip: open your CSV URL in a new tab — you should see/download raw CSV.
-      </div>
-    </div>
 
-    <div id="errorBox" class="errorBox">
-      <div class="errorTitle">Problem</div>
-      <div class="errorText" id="errorText"></div>
-    </div>
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
 
-    <hr>
+      <h3 style="margin:0 0 6px 0; font-size:14px;">Legend</h3>
+      <div class="legend" id="legend"></div>
 
-    <h3>Legend filter</h3>
-    <div class="hint">Click a type to highlight that column’s nodes.</div>
-    <div class="legend" id="legend"></div>
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
 
-    <hr>
+      <h3 style="margin:0 0 6px 0; font-size:14px;">Notes</h3>
+      <table>
+        <tr><td>Click</td><td>a node to center it</td></tr>
+        <tr><td>Drag</td><td>nodes to rearrange</td></tr>
+        <tr><td>Tip</td><td>Use Top N + Minimum edge weight to keep it fast.</td></tr>
+      </table>
 
-    <h3>Status</h3>
-    <p id="status" class="hint"></p>
+      <p class="hint" id="status" style="margin-top:10px;"></p>
+    </aside>
 
-    <hr>
-
-    <h3>Data requirements</h3>
-    <div class="hint">
-      Required headers:
-      <div class="mono" style="margin-top:6px;">
-        sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount
-      </div>
-    </div>
-  </aside>
-
-  <main>
-    <div id="cy"></div>
-  </main>
-</div>
+    <main>
+      <div id="cy"></div>
+    </main>
+  </div>
 
 <script>
-  // ========= ONE PLACE TO SET YOUR URL =========
+  // ========= CONFIG =========
+  // IMPORTANT:
+  // Use a PUBLISHED CSV URL (File → Share → Publish to web → CSV).
+  // Example format:
+  // https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
   const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv";
-  // ===========================================
 
-  cytoscape.use(cytoscapeFcose);
-
-  // ===== Config =====
+  // These must match your sheet header names exactly (case-sensitive).
   const COLUMNS = [
     "sender_name",
     "sender_agent",
@@ -174,54 +137,41 @@
     "payee_agent",
     "payee_operator"
   ];
+
+  // Optional numeric column used for aggregation
   const AMOUNT_COLUMN = "amount";
-  const TOP_N = 5;
 
   const TYPE_COLORS = {
-    sender_name: "#1f77b4",
-    sender_agent: "#ff7f0e",
+    sender_name:     "#1f77b4",
+    sender_agent:    "#ff7f0e",
     sender_operator: "#2ca02c",
-    payee_name: "#d62728",
-    payee_agent: "#9467bd",
-    payee_operator: "#8c564b"
+    payee_name:      "#d62728",
+    payee_agent:     "#9467bd",
+    payee_operator:  "#8c564b"
   };
 
-  // ===== State =====
+  // Safety caps (keeps UI responsive for large CSVs)
+  const MAX_DATALIST_OPTIONS = 5000;
+
+  // ========= STATE =========
   let cy = null;
   let activeType = null;
-  let selectedNodeIds = new Set();
+  let cachedRows = null;
 
-  // ===== DOM =====
-  const $ = (id) => document.getElementById(id);
-  function setStatus(msg) { $("status").textContent = msg || ""; }
+  // label -> array of cy node ids (same label may exist in multiple types)
+  let nodeByLabel = new Map();
 
-  function showError(text) {
-    $("errorBox").style.display = "block";
-    $("errorText").textContent = text || "";
-  }
-  function clearError() {
-    $("errorBox").style.display = "none";
-    $("errorText").textContent = "";
+  // ========= HELPERS =========
+  function setStatus(msg) {
+    document.getElementById("status").textContent = msg || "";
   }
 
-  function setConn(ok, msg) {
-    $("connStatus").innerHTML = ok
-      ? `<span class="ok">Connected</span> — ${escapeHtml(msg || "")}`
-      : `<span class="bad">Failed</span> — ${escapeHtml(msg || "")}`;
-  }
-  function setHttp(msg) { $("httpStatus").textContent = msg || "—"; }
-  function setHeaders(list) { $("headerList").textContent = (list && list.length) ? list.join(", ") : "—"; }
-
-  function escapeHtml(s) {
-    return String(s || "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
+  function nodeId(type, value) {
+    return `${type}::${String(value)}`;
   }
 
-  // ===== Helpers =====
-  function normalize(v) {
-    if (v == null) return "";
+  function normalizeCell(v) {
+    if (v === undefined || v === null) return "";
     const s = String(v).trim();
     if (!s) return "";
     const low = s.toLowerCase();
@@ -230,95 +180,15 @@
   }
 
   function toNumber(v) {
-    const n = Number(normalize(v).replace(/,/g, ""));
+    const s = normalizeCell(v).replace(/,/g, "");
+    const n = Number(s);
     return Number.isFinite(n) ? n : 0;
   }
 
-  function fmtMoney(n) {
-    const num = Number(n) || 0;
-    return "$" + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  function nodeId(type, value) {
-    return `${type}::${String(value)}`;
-  }
-
-  function normalizeHeader(h) {
-    return (h ?? "").toString().replace(/^\uFEFF/, "").trim();
-  }
-
-  // ===== Connection + header check (fetch + parse only header row) =====
-  async function connectAndInspect(url) {
-    clearError();
-    setConn(false, "Connecting…");
-    setHttp("…");
-    setHeaders([]);
-
-    let resp;
-    try {
-      resp = await fetch(url, { cache: "no-store" });
-    } catch (e) {
-      setConn(false, "Network/CORS blocked");
-      setHttp("fetch() failed");
-      throw new Error(
-        "Could not fetch the CSV URL.\n\n" +
-        "Common causes:\n" +
-        "• You opened index.html via file:// (double click). Use GitHub Pages or a local server.\n" +
-        "• The sheet is not published/public.\n" +
-        "• CORS blocked the request.\n\n" +
-        "Raw error: " + (e?.message || String(e))
-      );
-    }
-
-    setHttp(`${resp.status} ${resp.statusText}`);
-
-    if (!resp.ok) {
-      setConn(false, "HTTP error");
-      throw new Error(`HTTP error fetching CSV: ${resp.status} ${resp.statusText}`);
-    }
-
-    const text = await resp.text();
-
-    // Parse just enough to get headers + a first row
-    const parsed = Papa.parse(text, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: normalizeHeader
-    });
-
-    if (parsed.errors && parsed.errors.length) {
-      setConn(false, "Parse error");
-      throw new Error("CSV parse error: " + parsed.errors[0].message);
-    }
-
-    const first = parsed.data?.[0] || {};
-    const headers = Object.keys(first)
-      .map(normalizeHeader)
-      .filter(k => k.length > 0);
-
-    setHeaders(headers);
-
-    // Mark connection as OK as soon as we successfully fetched + parsed
-    setConn(true, "Fetched & parsed CSV");
-
-    return { rows: parsed.data || [], headers };
-  }
-
-  function validateHeadersFromList(headers) {
-    const required = [...COLUMNS, AMOUNT_COLUMN];
-    const missing = required.filter(h => !headers.includes(h));
-    if (missing.length) {
-      throw new Error(
-        "Missing required columns:\n" + missing.join(", ") + "\n\n" +
-        "Found columns:\n" + headers.join(", ")
-      );
-    }
-  }
-
-  // ===== Legend =====
   function initLegend() {
-    const el = $("legend");
-    el.innerHTML = "";
+    const legend = document.getElementById("legend");
+    legend.innerHTML = "";
+
     for (const type of COLUMNS) {
       const btn = document.createElement("button");
       btn.dataset.type = type;
@@ -330,121 +200,152 @@
       const label = document.createElement("span");
       label.textContent = type;
 
-      btn.append(sw, label);
-      btn.addEventListener("click", () => toggleType(type));
-      el.appendChild(btn);
+      btn.appendChild(sw);
+      btn.appendChild(label);
+
+      btn.addEventListener("click", () => {
+        setActiveType(activeType === type ? null : type);
+      });
+
+      legend.appendChild(btn);
     }
   }
 
-  function toggleType(type) {
-    activeType = (activeType === type ? null : type);
+  function setActiveType(type) {
+    activeType = type;
+
     document.querySelectorAll("#legend button").forEach(b => {
       b.classList.toggle("active", b.dataset.type === activeType);
     });
-    applyFocusStyles();
+
+    if (!cy) return;
+
+    // If a search selection is active, prefer it (don't fight the user's selection).
+    const currentSearch = document.getElementById("attrSearch")?.value?.trim();
+    if (currentSearch) {
+      focusAttribute(currentSearch);
+      return;
+    }
+
+    if (!activeType) {
+      cy.nodes().removeClass("muted");
+      cy.edges().removeClass("muted");
+      return;
+    }
+
+    cy.nodes().forEach(n => {
+      n.toggleClass("muted", n.data("type") !== activeType);
+    });
+
+    cy.edges().forEach(e => {
+      const s = e.source(), t = e.target();
+      const connected =
+        (s.data("type") === activeType) || (t.data("type") === activeType);
+      e.toggleClass("muted", !connected);
+    });
   }
 
-  // ===== Build graph =====
-  function computeTopValues(rows) {
+  function computeTopValues(rows, columns, topN) {
     const counts = {};
-    for (const c of COLUMNS) counts[c] = new Map();
+    for (const col of columns) counts[col] = new Map();
 
-    for (const r of rows) {
-      for (const c of COLUMNS) {
-        const v = normalize(r[c]);
-        if (!v) continue;
-        counts[c].set(v, (counts[c].get(v) || 0) + 1);
+    for (const row of rows) {
+      for (const col of columns) {
+        const value = normalizeCell(row[col]);
+        if (!value) continue;
+        counts[col].set(value, (counts[col].get(value) || 0) + 1);
       }
     }
 
-    const top = {};
-    for (const c of COLUMNS) {
-      top[c] = new Set(
-        [...counts[c].entries()]
-          .sort((a,b) => b[1] - a[1])
-          .slice(0, TOP_N)
-          .map(([val]) => val)
-      );
+    const topValues = {};
+    for (const col of columns) {
+      const sorted = [...counts[col].entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topN)
+        .map(([value]) => value);
+      topValues[col] = new Set(sorted);
     }
-    return { top, counts };
+
+    return { topValues, counts };
   }
 
-  function buildElements(rows, top, counts) {
+  function buildElements(rows, topValues, counts, minEdgeWeight) {
     const nodes = new Map();
     const edges = new Map();
 
     for (const r of rows) {
-      const amt = toNumber(r[AMOUNT_COLUMN]);
       const present = [];
+      const amt = toNumber(r[AMOUNT_COLUMN]);
 
-      for (const c of COLUMNS) {
-        const v = normalize(r[c]);
-        if (!v || !top[c].has(v)) continue;
+      for (const col of COLUMNS) {
+        const value = normalizeCell(r[col]);
+        if (!value) continue;
+        if (!topValues[col].has(value)) continue;
 
-        const id = nodeId(c, v);
+        const id = nodeId(col, value);
+
         if (!nodes.has(id)) {
-          nodes.set(id, { data: { id, label: v, type: c, count: counts[c].get(v) || 0, amount_sum: 0 } });
+          nodes.set(id, {
+            data: {
+              id,
+              label: value,
+              type: col,
+              count: counts[col].get(value) || 0,
+              amount_sum: 0
+            }
+          });
         }
+
+        // sum of amount for rows where this node appears
         nodes.get(id).data.amount_sum += amt;
+
         present.push(id);
       }
 
-      for (let i=0; i<present.length; i++) {
-        for (let j=i+1; j<present.length; j++) {
+      // Pairwise relationships within the row
+      for (let i = 0; i < present.length; i++) {
+        for (let j = i + 1; j < present.length; j++) {
           const a = present[i], b = present[j];
-          const [s,t] = (a < b) ? [a,b] : [b,a];
-          const key = `${s}__${t}`;
+          const [source, target] = a < b ? [a, b] : [b, a];
+          const key = `${source}__${target}`;
+
           if (!edges.has(key)) {
-            edges.set(key, { data: { id:key, source:s, target:t, weight:0, amount_sum:0, label:"" } });
+            edges.set(key, { data: { id: key, source, target, weight: 1, amount_sum: amt } });
+          } else {
+            const e = edges.get(key);
+            e.data.weight += 1;
+            e.data.amount_sum += amt;
           }
-          const e = edges.get(key).data;
-          e.weight += 1;
-          e.amount_sum += amt;
         }
       }
     }
 
-    for (const e of edges.values()) {
-      e.data.label = `w=${e.data.weight}  $=${fmtMoney(e.data.amount_sum)}`;
-    }
+    const edgeList = [...edges.values()].filter(e => e.data.weight >= minEdgeWeight);
 
-    return { nodes: [...nodes.values()], edges: [...edges.values()] };
-  }
-
-  // ===== Layout =====
-  function fcoseLayout({ spread }) {
     return {
-      name: "fcose",
-      animate: true,
-      animationDuration: 900,
-      fit: true,
-      padding: 60,
-      nodeSeparation: spread ? 140 : 90,
-      idealEdgeLength: spread ? 220 : 140,
-      nodeRepulsion: spread ? 18000 : 12000,
-      gravity: 0.18,
-      packComponents: true,
-      quality: "default",
-      numIter: spread ? 2400 : 1600
+      nodes: [...nodes.values()],
+      edges: edgeList
     };
   }
 
-  function runRelayout(spread) {
-    if (!cy) return;
-    cy.stop();
-    cy.nodes().unlock();
-    cy.layout(fcoseLayout({ spread })).run();
+  async function loadCSV(url) {
+    return new Promise((resolve, reject) => {
+      Papa.parse(url, {
+        header: true,
+        download: true,
+        skipEmptyLines: true,
+        complete: (res) => resolve(res.data || []),
+        error: reject
+      });
+    });
   }
 
-  // ===== Render =====
   function createCy(elements) {
     if (cy) cy.destroy();
 
     cy = cytoscape({
-      container: $("cy"),
+      container: document.getElementById("cy"),
       elements: [...elements.nodes, ...elements.edges],
-      boxSelectionEnabled: true,
-      selectionType: "additive",
       style: [
         {
           selector: "node",
@@ -453,129 +354,167 @@
             "label": "data(label)",
             "font-size": 10,
             "text-wrap": "wrap",
-            "text-max-width": 110,
+            "text-max-width": 90,
             "text-valign": "center",
             "text-halign": "center",
             "color": "#111",
             "text-outline-color": "#fff",
             "text-outline-width": 2,
-            "width": 22,
-            "height": 22
+            "width": 18,
+            "height": 18
           }
         },
         {
           selector: "edge",
           style: {
             "curve-style": "bezier",
-            "opacity": 0.40,
-            "line-color": "#999",
+            "opacity": 0.35,
+            // thickness by frequency (weight). You can switch to amount_sum if preferred.
             "width": ele => Math.min(1 + ele.data("weight"), 8),
-            "label": "data(label)",
-            "font-size": 9,
-            "color": "#111",
-            "text-rotation": "autorotate",
-            "text-margin-y": -8,
-            "text-background-color": "#fff",
-            "text-background-opacity": 0.85,
-            "text-background-padding": 2
+            "line-color": "#999"
           }
         },
-        { selector: ".muted", style: { "opacity": 0.10 } },
-        { selector: ".hideEdgeLabels", style: { "label": "" } }
+        { selector: ".muted", style: { "opacity": 0.12 } }
       ],
-      layout: fcoseLayout({ spread: false })
-    });
-
-    cy.on("tap", (evt) => {
-      if (evt.target === cy) {
-        selectedNodeIds.clear();
-        applyFocusStyles();
+      layout: {
+        name: "cose",
+        animate: true,
+        randomize: true,
+        nodeRepulsion: 9000,
+        idealEdgeLength: 90
       }
     });
 
+    // Click node to center
     cy.on("tap", "node", (evt) => {
       const n = evt.target;
-      const isShift = evt.originalEvent && evt.originalEvent.shiftKey;
+      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
 
-      if (!isShift) {
-        selectedNodeIds.clear();
-        selectedNodeIds.add(n.id());
-      } else {
-        if (selectedNodeIds.has(n.id())) selectedNodeIds.delete(n.id());
-        else selectedNodeIds.add(n.id());
+      // also update search summary to match clicked node
+      const label = n.data("label");
+      const input = document.getElementById("attrSearch");
+      if (input) input.value = label;
+      focusAttribute(label);
+    });
+
+    // Build label -> node ids index for search
+    nodeByLabel = new Map();
+    cy.nodes().forEach(n => {
+      const label = n.data("label");
+      if (!nodeByLabel.has(label)) nodeByLabel.set(label, []);
+      nodeByLabel.get(label).push(n.id());
+    });
+
+    // Populate datalist (cap to keep DOM fast)
+    const dl = document.getElementById("attrOptions");
+    if (dl) {
+      dl.innerHTML = "";
+      let i = 0;
+      for (const label of nodeByLabel.keys()) {
+        const opt = document.createElement("option");
+        opt.value = label;
+        dl.appendChild(opt);
+        i++;
+        if (i >= MAX_DATALIST_OPTIONS) break;
       }
+    }
 
-      applyFocusStyles();
-      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.15) }, { duration: 200 });
-    });
-
-    $("edgeLabelsToggle").addEventListener("change", () => {
-      if (!cy) return;
-      cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
-    });
-    cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
+    // Re-apply any active filters
+    setActiveType(activeType);
+    const currentSearch = document.getElementById("attrSearch")?.value?.trim();
+    if (currentSearch) focusAttribute(currentSearch);
 
     return cy;
   }
 
-  function applyFocusStyles() {
-    if (!cy) return;
-    cy.elements().removeClass("muted");
-
-    const hasSelection = selectedNodeIds.size > 0;
-    const hasType = !!activeType;
-    if (!hasSelection && !hasType) return;
-
-    cy.elements().addClass("muted");
-    let keep = cy.collection();
-
-    if (hasSelection) {
-      for (const id of selectedNodeIds) {
-        const n = cy.getElementById(id);
-        if (n && !n.empty()) keep = keep.union(n.closedNeighborhood());
-      }
-    } else if (hasType) {
-      const typeNodes = cy.nodes().filter(n => n.data("type") === activeType);
-      keep = keep.union(typeNodes).union(typeNodes.connectedEdges()).union(typeNodes.neighborhood("node"));
-    }
-
-    keep.removeClass("muted");
+  function validateColumns(rows) {
+    const first = rows[0] || {};
+    const required = [...COLUMNS, AMOUNT_COLUMN];
+    const missing = required.filter(c => !(c in first));
+    if (missing.length) throw new Error("Missing columns: " + missing.join(", "));
   }
 
-  // ===== Main =====
-  async function main() {
-    initLegend();
+  function clearSearch() {
+    const input = document.getElementById("attrSearch");
+    const summaryEl = document.getElementById("attrSummary");
+    if (input) input.value = "";
+    if (summaryEl) summaryEl.textContent = "No selection";
 
-    $("fitBtn").addEventListener("click", () => cy && cy.fit(undefined, 40));
-    $("relayoutBtn").addEventListener("click", () => runRelayout(false));
-    $("spreadBtn").addEventListener("click", () => runRelayout(true));
-    $("clearSelBtn").addEventListener("click", () => { selectedNodeIds.clear(); applyFocusStyles(); });
-    $("resetBtn").addEventListener("click", () => { activeType = null; selectedNodeIds.clear(); applyFocusStyles(); });
+    // restore legend filter (or full)
+    setActiveType(activeType);
+  }
+
+  function focusAttribute(label) {
+    const summaryEl = document.getElementById("attrSummary");
+    if (!cy || !label) {
+      if (summaryEl) summaryEl.textContent = "No selection";
+      return;
+    }
+
+    const ids = nodeByLabel.get(label);
+    if (!ids || !ids.length) {
+      if (summaryEl) summaryEl.textContent = `Not found: ${label}`;
+      return;
+    }
+
+    // If the same label exists in multiple types, choose the first.
+    // (If you want a chooser UI, tell me and I’ll add it.)
+    const node = cy.getElementById(ids[0]);
+    if (!node || node.empty()) return;
+
+    // Dim everything, highlight neighborhood
+    cy.elements().addClass("muted");
+    const hood = node.closedNeighborhood();
+    hood.removeClass("muted");
+
+    // Center
+    cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
+
+    // Totals:
+    const nodeAmt = node.data("amount_sum") || 0;
+
+    // Sum of incident edges' amount_sum (can double-count rows if a row produces multiple edges around this node)
+    let linkedAmt = 0;
+    node.connectedEdges().forEach(e => linkedAmt += (e.data("amount_sum") || 0));
+
+    const neighbors = node.neighborhood("node");
+    const neighborCount = neighbors.length;
+
+    if (summaryEl) {
+      summaryEl.textContent =
+        `${label} • links: ${neighborCount} • node amount: ${nodeAmt.toFixed(2)} • linked amount: ${linkedAmt.toFixed(2)}`;
+    }
+  }
+
+  async function rebuildGraph() {
+    if (!SHEET_CSV_URL || SHEET_CSV_URL.includes("PASTE_YOUR_PUBLISHED")) {
+      setStatus("Paste your published Google Sheets CSV URL into SHEET_CSV_URL in index.html.");
+      return;
+    }
 
     try {
-      setStatus("Connecting + inspecting headers…");
-      const { rows, headers } = await connectAndInspect(SHEET_CSV_URL);
+      setStatus("Loading CSV…");
 
-      // Validate headers and show a nice error if wrong
-      validateHeadersFromList(headers);
+      // Load (or reuse cached)
+      const rows = cachedRows || await loadCSV(SHEET_CSV_URL);
+      cachedRows = rows;
 
-      setStatus("Building graph…");
-      const { top, counts } = computeTopValues(rows);
-      const elements = buildElements(rows, top, counts);
-      $("counts").textContent = `${elements.nodes.length} nodes • ${elements.edges.length} edges`;
+      if (!rows.length) {
+        setStatus("No rows found in CSV.");
+        return;
+      }
 
-      setStatus("Rendering…");
+      validateColumns(rows);
+
+      const topN = Number(document.getElementById("topN").value);
+      const minEdge = Number(document.getElementById("minEdge").value);
+
+      const { topValues, counts } = computeTopValues(rows, COLUMNS, topN);
+      const elements = buildElements(rows, topValues, counts, minEdge);
+
+      document.getElementById("counts").textContent =
+        `${elements.nodes.length} nodes • ${elements.edges.length} edges`;
+
       createCy(elements);
 
-      setStatus(`Loaded ${rows.length} rows • top ${TOP_N}/category`);
-    } catch (e) {
-      console.error(e);
-      showError(e?.message || String(e));
-      setStatus("Failed. See error box.");
-    }
-  }
-
-  main();
-</script>
-</body>
-</html>
+      setStatus(`Loaded ${rows.length} rows. Showing top ${topN}/category, edges weigh
