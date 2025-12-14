@@ -13,7 +13,7 @@
 
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    #wrap { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    #wrap { display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
     #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
     #cy { height: 100vh; width: 100%; }
 
@@ -25,16 +25,21 @@
       text-align: left;
     }
     .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
-    .muted { opacity: 0.15; }
-    .highlight { outline: 3px solid #000; outline-offset: 2px; }
+
+    .muted { opacity: 0.12; }
+    .legend button.active { outline: 3px solid #000; outline-offset: 2px; }
 
     .hint { font-size: 12px; color: #666; line-height: 1.35; }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .pill { font-size: 12px; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; color: #444; }
+    .pill { font-size: 12px; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; color: #444; display:inline-block; }
     .controls { display: grid; gap: 10px; margin-top: 12px; }
     .control { display: grid; gap: 6px; }
     label { font-size: 12px; color: #444; }
     input[type="range"] { width: 100%; }
+    input[type="text"] {
+      padding: 10px; border: 1px solid #ddd; border-radius: 10px; width: 100%;
+      font-size: 14px;
+    }
     button.secondary {
       padding:10px 12px; border-radius:10px; border:1px solid #ddd; background:#fff; cursor:pointer;
     }
@@ -42,6 +47,8 @@
     td { font-size: 12px; padding: 4px 0; vertical-align: top; }
     td:nth-child(1){ color:#666; width: 62px; }
     .small { font-size: 12px; color:#666; }
+    .kpi { display:grid; gap:6px; margin-top:8px; }
+    .kpi .pill { width: fit-content; }
   </style>
 </head>
 
@@ -54,8 +61,9 @@
       </div>
 
       <p class="hint" style="margin-top:8px;">
-        Loads data from a published Google Sheet (CSV).
-        Legend filter: click a category to highlight only nodes from that column type.
+        Loads data from a published Google Sheet (CSV).<br/>
+        Legend filter: click a category to highlight nodes of that column type.<br/>
+        Search: type a value (e.g. <code>agent_11</code>) to show everything linked to it and amount totals.
       </p>
 
       <div class="controls">
@@ -70,12 +78,24 @@
           <input id="minEdge" type="range" min="1" max="20" step="1" value="1" />
           <div class="small">Hide weak/coincidental relationships.</div>
         </div>
+
+        <div class="control">
+          <label for="attrSearch">Find an attribute (exact match)</label>
+          <input id="attrSearch" type="text" list="attrOptions" placeholder="Start typing…" />
+          <datalist id="attrOptions"></datalist>
+          <div class="small">Select a value to highlight its neighborhood + compute amount totals.</div>
+
+          <div class="kpi">
+            <span id="attrSummary" class="pill">No selection</span>
+          </div>
+        </div>
       </div>
 
-      <div style="margin-top:12px; display:flex; gap:8px;">
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap: wrap;">
         <button id="resetBtn" class="secondary">Reset</button>
         <button id="fitBtn" class="secondary">Fit</button>
         <button id="reloadBtn" class="secondary">Reload</button>
+        <button id="clearSearchBtn" class="secondary">Clear search</button>
       </div>
 
       <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
@@ -89,6 +109,7 @@
       <table>
         <tr><td>Click</td><td>a node to center it</td></tr>
         <tr><td>Drag</td><td>nodes to rearrange</td></tr>
+        <tr><td>Tip</td><td>Use Top N + Minimum edge weight to keep it fast.</td></tr>
       </table>
 
       <p class="hint" id="status" style="margin-top:10px;"></p>
@@ -101,10 +122,13 @@
 
 <script>
   // ========= CONFIG =========
-  // Replace this with your Google Sheets "Publish to web" CSV URL:
-  // It should look like: https://docs.google.com/spreadsheets/d/e/.../pub?output=csv
-  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv"
+  // IMPORTANT:
+  // Use a PUBLISHED CSV URL (File → Share → Publish to web → CSV).
+  // Example format:
+  // https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
+  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv";
 
+  // These must match your sheet header names exactly (case-sensitive).
   const COLUMNS = [
     "sender_name",
     "sender_agent",
@@ -113,6 +137,9 @@
     "payee_agent",
     "payee_operator"
   ];
+
+  // Optional numeric column used for aggregation
+  const AMOUNT_COLUMN = "amount";
 
   const TYPE_COLORS = {
     sender_name:     "#1f77b4",
@@ -123,10 +150,16 @@
     payee_operator:  "#8c564b"
   };
 
+  // Safety caps (keeps UI responsive for large CSVs)
+  const MAX_DATALIST_OPTIONS = 5000;
+
   // ========= STATE =========
   let cy = null;
   let activeType = null;
   let cachedRows = null;
+
+  // label -> array of cy node ids (same label may exist in multiple types)
+  let nodeByLabel = new Map();
 
   // ========= HELPERS =========
   function setStatus(msg) {
@@ -140,9 +173,16 @@
   function normalizeCell(v) {
     if (v === undefined || v === null) return "";
     const s = String(v).trim();
-    // common garbage values
-    if (!s || s.toLowerCase() === "nan" || s.toLowerCase() === "null") return "";
+    if (!s) return "";
+    const low = s.toLowerCase();
+    if (low === "nan" || low === "null" || low === "undefined") return "";
     return s;
+  }
+
+  function toNumber(v) {
+    const s = normalizeCell(v).replace(/,/g, "");
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
   }
 
   function initLegend() {
@@ -175,10 +215,17 @@
     activeType = type;
 
     document.querySelectorAll("#legend button").forEach(b => {
-      b.classList.toggle("highlight", b.dataset.type === activeType);
+      b.classList.toggle("active", b.dataset.type === activeType);
     });
 
     if (!cy) return;
+
+    // If a search selection is active, prefer it (don't fight the user's selection).
+    const currentSearch = document.getElementById("attrSearch")?.value?.trim();
+    if (currentSearch) {
+      focusAttribute(currentSearch);
+      return;
+    }
 
     if (!activeType) {
       cy.nodes().removeClass("muted");
@@ -228,6 +275,7 @@
 
     for (const r of rows) {
       const present = [];
+      const amt = toNumber(r[AMOUNT_COLUMN]);
 
       for (const col of COLUMNS) {
         const value = normalizeCell(r[col]);
@@ -235,16 +283,22 @@
         if (!topValues[col].has(value)) continue;
 
         const id = nodeId(col, value);
+
         if (!nodes.has(id)) {
           nodes.set(id, {
             data: {
               id,
               label: value,
               type: col,
-              count: counts[col].get(value) || 0
+              count: counts[col].get(value) || 0,
+              amount_sum: 0
             }
           });
         }
+
+        // sum of amount for rows where this node appears
+        nodes.get(id).data.amount_sum += amt;
+
         present.push(id);
       }
 
@@ -256,15 +310,16 @@
           const key = `${source}__${target}`;
 
           if (!edges.has(key)) {
-            edges.set(key, { data: { id: key, source, target, weight: 1 } });
+            edges.set(key, { data: { id: key, source, target, weight: 1, amount_sum: amt } });
           } else {
-            edges.get(key).data.weight += 1;
+            const e = edges.get(key);
+            e.data.weight += 1;
+            e.data.amount_sum += amt;
           }
         }
       }
     }
 
-    // Apply min edge weight filter
     const edgeList = [...edges.values()].filter(e => e.data.weight >= minEdgeWeight);
 
     return {
@@ -314,6 +369,7 @@
           style: {
             "curve-style": "bezier",
             "opacity": 0.35,
+            // thickness by frequency (weight). You can switch to amount_sum if preferred.
             "width": ele => Math.min(1 + ele.data("weight"), 8),
             "line-color": "#999"
           }
@@ -329,27 +385,104 @@
       }
     });
 
-    // Node tooltip via native title attribute
-    cy.nodes().forEach(n => {
-      n.data("title", `${n.data("label")} • ${n.data("type")} • count=${n.data("count")}`);
-    });
-
+    // Click node to center
     cy.on("tap", "node", (evt) => {
       const n = evt.target;
       cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
+
+      // also update search summary to match clicked node
+      const label = n.data("label");
+      const input = document.getElementById("attrSearch");
+      if (input) input.value = label;
+      focusAttribute(label);
     });
 
-    // Re-apply active type filter if set
+    // Build label -> node ids index for search
+    nodeByLabel = new Map();
+    cy.nodes().forEach(n => {
+      const label = n.data("label");
+      if (!nodeByLabel.has(label)) nodeByLabel.set(label, []);
+      nodeByLabel.get(label).push(n.id());
+    });
+
+    // Populate datalist (cap to keep DOM fast)
+    const dl = document.getElementById("attrOptions");
+    if (dl) {
+      dl.innerHTML = "";
+      let i = 0;
+      for (const label of nodeByLabel.keys()) {
+        const opt = document.createElement("option");
+        opt.value = label;
+        dl.appendChild(opt);
+        i++;
+        if (i >= MAX_DATALIST_OPTIONS) break;
+      }
+    }
+
+    // Re-apply any active filters
     setActiveType(activeType);
+    const currentSearch = document.getElementById("attrSearch")?.value?.trim();
+    if (currentSearch) focusAttribute(currentSearch);
 
     return cy;
   }
 
   function validateColumns(rows) {
     const first = rows[0] || {};
-    const missing = COLUMNS.filter(c => !(c in first));
-    if (missing.length) {
-      throw new Error("Missing columns: " + missing.join(", "));
+    const required = [...COLUMNS, AMOUNT_COLUMN];
+    const missing = required.filter(c => !(c in first));
+    if (missing.length) throw new Error("Missing columns: " + missing.join(", "));
+  }
+
+  function clearSearch() {
+    const input = document.getElementById("attrSearch");
+    const summaryEl = document.getElementById("attrSummary");
+    if (input) input.value = "";
+    if (summaryEl) summaryEl.textContent = "No selection";
+
+    // restore legend filter (or full)
+    setActiveType(activeType);
+  }
+
+  function focusAttribute(label) {
+    const summaryEl = document.getElementById("attrSummary");
+    if (!cy || !label) {
+      if (summaryEl) summaryEl.textContent = "No selection";
+      return;
+    }
+
+    const ids = nodeByLabel.get(label);
+    if (!ids || !ids.length) {
+      if (summaryEl) summaryEl.textContent = `Not found: ${label}`;
+      return;
+    }
+
+    // If the same label exists in multiple types, choose the first.
+    // (If you want a chooser UI, tell me and I’ll add it.)
+    const node = cy.getElementById(ids[0]);
+    if (!node || node.empty()) return;
+
+    // Dim everything, highlight neighborhood
+    cy.elements().addClass("muted");
+    const hood = node.closedNeighborhood();
+    hood.removeClass("muted");
+
+    // Center
+    cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
+
+    // Totals:
+    const nodeAmt = node.data("amount_sum") || 0;
+
+    // Sum of incident edges' amount_sum (can double-count rows if a row produces multiple edges around this node)
+    let linkedAmt = 0;
+    node.connectedEdges().forEach(e => linkedAmt += (e.data("amount_sum") || 0));
+
+    const neighbors = node.neighborhood("node");
+    const neighborCount = neighbors.length;
+
+    if (summaryEl) {
+      summaryEl.textContent =
+        `${label} • links: ${neighborCount} • node amount: ${nodeAmt.toFixed(2)} • linked amount: ${linkedAmt.toFixed(2)}`;
     }
   }
 
@@ -360,9 +493,9 @@
     }
 
     try {
-      setStatus("Loading CSV from Google Sheets…");
+      setStatus("Loading CSV…");
 
-      // Load (or reuse)
+      // Load (or reuse cached)
       const rows = cachedRows || await loadCSV(SHEET_CSV_URL);
       cachedRows = rows;
 
@@ -384,38 +517,4 @@
 
       createCy(elements);
 
-      setStatus(`Loaded ${rows.length} rows. Showing top ${topN}/category, edges weight ≥ ${minEdge}.`);
-    } catch (e) {
-      console.error(e);
-      setStatus("Error: " + (e?.message || String(e)));
-      alert(e?.message || String(e));
-    }
-  }
-
-  function wireUI() {
-    const topN = document.getElementById("topN");
-    const topNLabel = document.getElementById("topNLabel");
-    topN.addEventListener("input", () => { topNLabel.textContent = topN.value; });
-    topN.addEventListener("change", rebuildGraph);
-
-    const minEdge = document.getElementById("minEdge");
-    const minEdgeLabel = document.getElementById("minEdgeLabel");
-    minEdge.addEventListener("input", () => { minEdgeLabel.textContent = minEdge.value; });
-    minEdge.addEventListener("change", rebuildGraph);
-
-    document.getElementById("resetBtn").addEventListener("click", () => setActiveType(null));
-    document.getElementById("fitBtn").addEventListener("click", () => cy && cy.fit(undefined, 30));
-    document.getElementById("reloadBtn").addEventListener("click", async () => {
-      cachedRows = null;
-      await rebuildGraph();
-    });
-  }
-
-  (async function main() {
-    initLegend();
-    wireUI();
-    await rebuildGraph();
-  })();
-</script>
-</body>
-</html>
+      setStatus(`Loaded ${rows.length} rows. Showing top ${topN}/category, edges weigh
