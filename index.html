@@ -13,25 +13,26 @@
 
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    #wrap { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+    #wrap { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
     #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
     #cy { width: 100%; height: 100vh; }
 
     .legend { display: grid; gap: 8px; margin-top: 12px; }
     .legend button {
       display: flex; align-items: center; gap: 10px;
-      padding: 10px; border: 1px solid #ddd;
-      background: #fff; border-radius: 10px;
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 10px;
       cursor: pointer;
+      text-align: left;
     }
     .legend button.active {
       outline: 3px solid #000;
       outline-offset: 2px;
     }
-    .swatch {
-      width: 14px; height: 14px;
-      border-radius: 50%;
-    }
+    .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
     .muted { opacity: 0.12; }
 
     .pill {
@@ -41,6 +42,7 @@
       border:1px solid #ddd;
       border-radius:999px;
       color:#444;
+      margin-left: 6px;
     }
     .hint { font-size: 12px; color: #666; line-height: 1.4; }
     button.secondary {
@@ -49,8 +51,10 @@
       border-radius:10px;
       background:#fff;
       cursor:pointer;
-      margin-top:8px;
+      width: 100%;
     }
+    .btnRow { display:grid; gap:8px; margin-top:10px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
   </style>
 </head>
 
@@ -58,14 +62,21 @@
 <div id="wrap">
   <aside id="sidebar">
     <h2 style="margin:0;">Graph</h2>
-    <span id="counts" class="pill">…</span>
+    <div style="margin-top:6px;">
+      <span id="counts" class="pill">…</span>
+    </div>
 
-    <p class="hint" style="margin-top:8px;">
-      Top 5 values per category.<br>
-      Click a legend item to highlight nodes of that type.
+    <p class="hint" style="margin-top:10px;">
+      Top 5 values per category. Click a legend item to highlight nodes of that type.
+      Use <b>Spread out</b> if the graph is clustered.
     </p>
 
-    <button id="resetBtn" class="secondary">Reset</button>
+    <div class="btnRow">
+      <button id="resetBtn" class="secondary">Reset</button>
+      <button id="spreadBtn" class="secondary">Spread out</button>
+      <button id="stopBtn" class="secondary">Stop layout</button>
+      <button id="fitBtn" class="secondary">Fit to screen</button>
+    </div>
 
     <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
 
@@ -73,6 +84,14 @@
     <div class="legend" id="legend"></div>
 
     <p id="status" class="hint" style="margin-top:10px;"></p>
+
+    <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
+
+    <p class="hint">
+      <b>Data requirements:</b><br/>
+      Your published CSV must include headers:<br/>
+      <code>sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount</code>
+    </p>
   </aside>
 
   <main>
@@ -82,8 +101,12 @@
 
 <script>
   // ========= CONFIG =========
-  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv";
+  // Use a PUBLISHED Google Sheets CSV URL:
+  // Google Sheets → File → Share → Publish to web → CSV
+  // Example: https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
+  const SHEET_CSV_URL = "PASTE_YOUR_PUBLISHED_CSV_URL_HERE";
 
+  // Must match CSV headers exactly
   const COLUMNS = [
     "sender_name",
     "sender_agent",
@@ -105,24 +128,33 @@
     payee_operator: "#8c564b"
   };
 
+  // ========= STATE =========
   let cy = null;
   let activeType = null;
 
   // ========= HELPERS =========
-  const normalize = v => {
+  const $ = (id) => document.getElementById(id);
+
+  function setStatus(msg) {
+    $("status").textContent = msg || "";
+  }
+
+  function normalize(v) {
     if (v == null) return "";
     const s = String(v).trim();
-    if (!s || ["nan","null","undefined"].includes(s.toLowerCase())) return "";
+    if (!s) return "";
+    const low = s.toLowerCase();
+    if (low === "nan" || low === "null" || low === "undefined") return "";
     return s;
-  };
+  }
 
-  const toNumber = v => {
-    const n = Number(normalize(v).replace(/,/g,""));
+  function toNumber(v) {
+    const n = Number(normalize(v).replace(/,/g, ""));
     return Number.isFinite(n) ? n : 0;
-  };
+  }
 
   function initLegend() {
-    const el = document.getElementById("legend");
+    const el = $("legend");
     el.innerHTML = "";
 
     for (const type of COLUMNS) {
@@ -131,7 +163,7 @@
 
       const sw = document.createElement("span");
       sw.className = "swatch";
-      sw.style.background = TYPE_COLORS[type];
+      sw.style.background = TYPE_COLORS[type] || "#999";
 
       const label = document.createElement("span");
       label.textContent = type;
@@ -143,7 +175,9 @@
   }
 
   function toggleType(type) {
-    activeType = activeType === type ? null : type;
+    // If called with null, reset.
+    if (!type) activeType = null;
+    else activeType = (activeType === type ? null : type);
 
     document.querySelectorAll(".legend button").forEach(b => {
       b.classList.toggle("active", b.dataset.type === activeType);
@@ -179,24 +213,36 @@
     });
   }
 
+  function validateHeaders(rows) {
+    const first = rows[0] || {};
+    const required = [...COLUMNS, AMOUNT_COLUMN];
+    const missing = required.filter(h => !(h in first));
+    if (missing.length) {
+      throw new Error("Missing columns: " + missing.join(", "));
+    }
+  }
+
   function buildGraph(rows) {
+    // Count frequency per column for top-N selection
     const counts = {};
     COLUMNS.forEach(c => counts[c] = new Map());
 
     rows.forEach(r => {
       COLUMNS.forEach(c => {
         const v = normalize(r[c]);
-        if (v) counts[c].set(v, (counts[c].get(v)||0)+1);
+        if (!v) return;
+        counts[c].set(v, (counts[c].get(v) || 0) + 1);
       });
     });
 
+    // Compute top-N values per category
     const top = {};
     COLUMNS.forEach(c => {
       top[c] = new Set(
         [...counts[c].entries()]
-          .sort((a,b)=>b[1]-a[1])
+          .sort((a, b) => b[1] - a[1])
           .slice(0, TOP_N)
-          .map(d=>d[0])
+          .map(([val]) => val)
       );
     });
 
@@ -210,47 +256,47 @@
       COLUMNS.forEach(c => {
         const v = normalize(r[c]);
         if (!v || !top[c].has(v)) return;
+
         const id = `${c}::${v}`;
 
         if (!nodes.has(id)) {
-          nodes.set(id, {
-            data: { id, label: v, type: c, amount: 0 }
-          });
+          nodes.set(id, { data: { id, label: v, type: c, amount: 0 } });
         }
+        // Node total amount across rows it appears in
         nodes.get(id).data.amount += amt;
+
         present.push(id);
       });
 
-      for (let i=0;i<present.length;i++) {
-        for (let j=i+1;j<present.length;j++) {
+      // Create pairwise edges for values that co-occur in this row
+      for (let i = 0; i < present.length; i++) {
+        for (let j = i + 1; j < present.length; j++) {
           const a = present[i], b = present[j];
-          const key = a<b ? `${a}__${b}` : `${b}__${a}`;
+          const key = (a < b) ? `${a}__${b}` : `${b}__${a}`;
+
           if (!edges.has(key)) {
-            edges.set(key, { data: { id:key, source:a, target:b, weight:0, amount:0 } });
+            edges.set(key, { data: { id: key, source: a, target: b, weight: 0, amount: 0 } });
           }
-          edges.get(key).data.weight++;
+          edges.get(key).data.weight += 1;
           edges.get(key).data.amount += amt;
         }
       }
     });
 
-    return {
-      nodes: [...nodes.values()],
-      edges: [...edges.values()]
-    };
+    return { nodes: [...nodes.values()], edges: [...edges.values()] };
   }
 
-  function render(elements) {
+  function render(graph) {
     if (cy) cy.destroy();
 
     cy = cytoscape({
-      container: document.getElementById("cy"),
-      elements: [...elements.nodes, ...elements.edges],
+      container: $("cy"),
+      elements: [...graph.nodes, ...graph.edges],
       style: [
         {
           selector: "node",
           style: {
-            "background-color": e => TYPE_COLORS[e.data("type")],
+            "background-color": e => TYPE_COLORS[e.data("type")] || "#999",
             "label": "data(label)",
             "font-size": 10,
             "text-outline-width": 2,
@@ -262,34 +308,97 @@
         {
           selector: "edge",
           style: {
-            "width": e => Math.min(1+e.data("weight"),8),
+            "width": e => Math.min(1 + e.data("weight"), 8),
             "opacity": 0.35,
-            "line-color": "#999"
+            "line-color": "#999",
+            "curve-style": "bezier"
           }
         },
         { selector: ".muted", style: { "opacity": 0.12 } }
       ],
-      layout: { name:"cose", animate:true }
+      layout: {
+        name: "cose",
+        animate: true,
+        randomize: true,
+        padding: 40
+      }
+    });
+
+    // Click node to center it
+    cy.on("tap", "node", (evt) => {
+      const n = evt.target;
+      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
     });
   }
 
+  // ======= Layout controls =======
+  function spreadOut() {
+    if (!cy) return;
+
+    cy.layout({
+      name: "cose",
+      animate: true,
+      randomize: true,
+      padding: 50,
+      // stronger separation (bigger = more spacing)
+      nodeRepulsion: 20000,
+      idealEdgeLength: 140,
+      edgeElasticity: 0.1,
+      numIter: 1000
+    }).run();
+  }
+
+  function stopLayout() {
+    if (!cy) return;
+    cy.stop();
+  }
+
+  function fitToScreen() {
+    if (!cy) return;
+    cy.fit(undefined, 30);
+  }
+
+  // ========= MAIN =========
   async function main() {
     initLegend();
-    document.getElementById("resetBtn").onclick = () => toggleType(null);
+
+    $("resetBtn").onclick = () => toggleType(null);
+    $("spreadBtn").onclick = spreadOut;
+    $("stopBtn").onclick = stopLayout;
+    $("fitBtn").onclick = fitToScreen;
+
+    if (!SHEET_CSV_URL || SHEET_CSV_URL.includes("PASTE_YOUR_PUBLISHED")) {
+      setStatus("Paste your published Google Sheets CSV URL into SHEET_CSV_URL in index.html.");
+      return;
+    }
 
     try {
-      document.getElementById("status").textContent = "Loading CSV…";
+      setStatus("Loading CSV…");
       const rows = await loadCSV();
+
+      if (!rows.length) {
+        setStatus("No rows found in CSV.");
+        return;
+      }
+
+      validateHeaders(rows);
+
       const graph = buildGraph(rows);
-      document.getElementById("counts").textContent =
-        `${graph.nodes.length} nodes • ${graph.edges.length} edges`;
+
+      $("counts").textContent = `${graph.nodes.length} nodes • ${graph.edges.length} edges`;
+
       render(graph);
-      document.getElementById("status").textContent =
-        `Loaded ${rows.length} rows • showing top ${TOP_N} per category`;
+
+      setStatus(`Loaded ${rows.length} rows • showing top ${TOP_N} per category`);
+
+      // If it's dense, run a stronger layout once after initial render
+      if (graph.nodes.length > 20 && graph.edges.length > 30) {
+        spreadOut();
+      }
     } catch (e) {
       console.error(e);
-      document.getElementById("status").textContent = "Error loading data";
-      alert(e.message);
+      setStatus("Error: " + (e?.message || String(e)));
+      alert(e?.message || String(e));
     }
   }
 
