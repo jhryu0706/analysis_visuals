@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Top-N Relationship Graph</title>
+
+  <!-- Cytoscape -->
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+
+  <!-- PapaParse for CSV -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #wrap { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
+    #cy { height: 100vh; width: 100%; }
+
+    .legend { display: grid; gap: 8px; margin-top: 12px; }
+    .legend button {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 10px 10px; border: 1px solid #ddd;
+      background: #fff; border-radius: 10px; cursor: pointer;
+      text-align: left;
+    }
+    .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
+    .muted { opacity: 0.15; }
+    .highlight { outline: 3px solid #000; outline-offset: 2px; }
+
+    .hint { font-size: 12px; color: #666; line-height: 1.35; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .pill { font-size: 12px; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; color: #444; }
+    .controls { display: grid; gap: 10px; margin-top: 12px; }
+    .control { display: grid; gap: 6px; }
+    label { font-size: 12px; color: #444; }
+    input[type="range"] { width: 100%; }
+    button.secondary {
+      padding:10px 12px; border-radius:10px; border:1px solid #ddd; background:#fff; cursor:pointer;
+    }
+    table { border-collapse: collapse; width: 100%; }
+    td { font-size: 12px; padding: 4px 0; vertical-align: top; }
+    td:nth-child(1){ color:#666; width: 62px; }
+    .small { font-size: 12px; color:#666; }
+  </style>
+</head>
+
+<body>
+  <div id="wrap">
+    <aside id="sidebar">
+      <div class="row">
+        <h2 style="margin:0;">Graph</h2>
+        <span id="counts" class="pill">…</span>
+      </div>
+
+      <p class="hint" style="margin-top:8px;">
+        Loads data from a published Google Sheet (CSV).
+        Legend filter: click a category to highlight only nodes from that column type.
+      </p>
+
+      <div class="controls">
+        <div class="control">
+          <label for="topN">Top N per category: <span id="topNLabel" class="pill">20</span></label>
+          <input id="topN" type="range" min="5" max="50" step="1" value="20" />
+          <div class="small">Higher N = denser graph.</div>
+        </div>
+
+        <div class="control">
+          <label for="minEdge">Minimum edge weight: <span id="minEdgeLabel" class="pill">1</span></label>
+          <input id="minEdge" type="range" min="1" max="20" step="1" value="1" />
+          <div class="small">Hide weak/coincidental relationships.</div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button id="resetBtn" class="secondary">Reset</button>
+        <button id="fitBtn" class="secondary">Fit</button>
+        <button id="reloadBtn" class="secondary">Reload</button>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
+
+      <h3 style="margin:0 0 6px 0; font-size:14px;">Legend</h3>
+      <div class="legend" id="legend"></div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
+
+      <h3 style="margin:0 0 6px 0; font-size:14px;">Notes</h3>
+      <table>
+        <tr><td>Click</td><td>a node to center it</td></tr>
+        <tr><td>Drag</td><td>nodes to rearrange</td></tr>
+      </table>
+
+      <p class="hint" id="status" style="margin-top:10px;"></p>
+    </aside>
+
+    <main>
+      <div id="cy"></div>
+    </main>
+  </div>
+
+<script>
+  // ========= CONFIG =========
+  // Replace this with your Google Sheets "Publish to web" CSV URL:
+  // It should look like: https://docs.google.com/spreadsheets/d/e/.../pub?output=csv
+  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1t1vtzcWyxN45u3n2bdyQkUfGmA_2_EPAIyS5eCz-xN0/export?format=csv";
+
+  const COLUMNS = [
+    "sender_name",
+    "sender_agent",
+    "sender_operator",
+    "payee_name",
+    "payee_agent",
+    "payee_operator"
+  ];
+
+  const TYPE_COLORS = {
+    sender_name:     "#1f77b4",
+    sender_agent:    "#ff7f0e",
+    sender_operator: "#2ca02c",
+    payee_name:      "#d62728",
+    payee_agent:     "#9467bd",
+    payee_operator:  "#8c564b"
+  };
+
+  // ========= STATE =========
+  let cy = null;
+  let activeType = null;
+  let cachedRows = null;
+
+  // ========= HELPERS =========
+  function setStatus(msg) {
+    document.getElementById("status").textContent = msg || "";
+  }
+
+  function nodeId(type, value) {
+    return `${type}::${String(value)}`;
+  }
+
+  function normalizeCell(v) {
+    if (v === undefined || v === null) return "";
+    const s = String(v).trim();
+    // common garbage values
+    if (!s || s.toLowerCase() === "nan" || s.toLowerCase() === "null") return "";
+    return s;
+  }
+
+  function initLegend() {
+    const legend = document.getElementById("legend");
+    legend.innerHTML = "";
+
+    for (const type of COLUMNS) {
+      const btn = document.createElement("button");
+      btn.dataset.type = type;
+
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = TYPE_COLORS[type] || "#999";
+
+      const label = document.createElement("span");
+      label.textContent = type;
+
+      btn.appendChild(sw);
+      btn.appendChild(label);
+
+      btn.addEventListener("click", () => {
+        setActiveType(activeType === type ? null : type);
+      });
+
+      legend.appendChild(btn);
+    }
+  }
+
+  function setActiveType(type) {
+    activeType = type;
+
+    document.querySelectorAll("#legend button").forEach(b => {
+      b.classList.toggle("highlight", b.dataset.type === activeType);
+    });
+
+    if (!cy) return;
+
+    if (!activeType) {
+      cy.nodes().removeClass("muted");
+      cy.edges().removeClass("muted");
+      return;
+    }
+
+    cy.nodes().forEach(n => {
+      n.toggleClass("muted", n.data("type") !== activeType);
+    });
+
+    cy.edges().forEach(e => {
+      const s = e.source(), t = e.target();
+      const connected =
+        (s.data("type") === activeType) || (t.data("type") === activeType);
+      e.toggleClass("muted", !connected);
+    });
+  }
+
+  function computeTopValues(rows, columns, topN) {
+    const counts = {};
+    for (const col of columns) counts[col] = new Map();
+
+    for (const row of rows) {
+      for (const col of columns) {
+        const value = normalizeCell(row[col]);
+        if (!value) continue;
+        counts[col].set(value, (counts[col].get(value) || 0) + 1);
+      }
+    }
+
+    const topValues = {};
+    for (const col of columns) {
+      const sorted = [...counts[col].entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topN)
+        .map(([value]) => value);
+      topValues[col] = new Set(sorted);
+    }
+
+    return { topValues, counts };
+  }
+
+  function buildElements(rows, topValues, counts, minEdgeWeight) {
+    const nodes = new Map();
+    const edges = new Map();
+
+    for (const r of rows) {
+      const present = [];
+
+      for (const col of COLUMNS) {
+        const value = normalizeCell(r[col]);
+        if (!value) continue;
+        if (!topValues[col].has(value)) continue;
+
+        const id = nodeId(col, value);
+        if (!nodes.has(id)) {
+          nodes.set(id, {
+            data: {
+              id,
+              label: value,
+              type: col,
+              count: counts[col].get(value) || 0
+            }
+          });
+        }
+        present.push(id);
+      }
+
+      // Pairwise relationships within the row
+      for (let i = 0; i < present.length; i++) {
+        for (let j = i + 1; j < present.length; j++) {
+          const a = present[i], b = present[j];
+          const [source, target] = a < b ? [a, b] : [b, a];
+          const key = `${source}__${target}`;
+
+          if (!edges.has(key)) {
+            edges.set(key, { data: { id: key, source, target, weight: 1 } });
+          } else {
+            edges.get(key).data.weight += 1;
+          }
+        }
+      }
+    }
+
+    // Apply min edge weight filter
+    const edgeList = [...edges.values()].filter(e => e.data.weight >= minEdgeWeight);
+
+    return {
+      nodes: [...nodes.values()],
+      edges: edgeList
+    };
+  }
+
+  async function loadCSV(url) {
+    return new Promise((resolve, reject) => {
+      Papa.parse(url, {
+        header: true,
+        download: true,
+        skipEmptyLines: true,
+        complete: (res) => resolve(res.data || []),
+        error: reject
+      });
+    });
+  }
+
+  function createCy(elements) {
+    if (cy) cy.destroy();
+
+    cy = cytoscape({
+      container: document.getElementById("cy"),
+      elements: [...elements.nodes, ...elements.edges],
+      style: [
+        {
+          selector: "node",
+          style: {
+            "background-color": ele => TYPE_COLORS[ele.data("type")] || "#999",
+            "label": "data(label)",
+            "font-size": 10,
+            "text-wrap": "wrap",
+            "text-max-width": 90,
+            "text-valign": "center",
+            "text-halign": "center",
+            "color": "#111",
+            "text-outline-color": "#fff",
+            "text-outline-width": 2,
+            "width": 18,
+            "height": 18
+          }
+        },
+        {
+          selector: "edge",
+          style: {
+            "curve-style": "bezier",
+            "opacity": 0.35,
+            "width": ele => Math.min(1 + ele.data("weight"), 8),
+            "line-color": "#999"
+          }
+        },
+        { selector: ".muted", style: { "opacity": 0.12 } }
+      ],
+      layout: {
+        name: "cose",
+        animate: true,
+        randomize: true,
+        nodeRepulsion: 9000,
+        idealEdgeLength: 90
+      }
+    });
+
+    // Node tooltip via native title attribute
+    cy.nodes().forEach(n => {
+      n.data("title", `${n.data("label")} • ${n.data("type")} • count=${n.data("count")}`);
+    });
+
+    cy.on("tap", "node", (evt) => {
+      const n = evt.target;
+      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
+    });
+
+    // Re-apply active type filter if set
+    setActiveType(activeType);
+
+    return cy;
+  }
+
+  function validateColumns(rows) {
+    const first = rows[0] || {};
+    const missing = COLUMNS.filter(c => !(c in first));
+    if (missing.length) {
+      throw new Error("Missing columns: " + missing.join(", "));
+    }
+  }
+
+  async function rebuildGraph() {
+    if (!SHEET_CSV_URL || SHEET_CSV_URL.includes("PASTE_YOUR_PUBLISHED")) {
+      setStatus("Paste your published Google Sheets CSV URL into SHEET_CSV_URL in index.html.");
+      return;
+    }
+
+    try {
+      setStatus("Loading CSV from Google Sheets…");
+
+      // Load (or reuse)
+      const rows = cachedRows || await loadCSV(SHEET_CSV_URL);
+      cachedRows = rows;
+
+      if (!rows.length) {
+        setStatus("No rows found in CSV.");
+        return;
+      }
+
+      validateColumns(rows);
+
+      const topN = Number(document.getElementById("topN").value);
+      const minEdge = Number(document.getElementById("minEdge").value);
+
+      const { topValues, counts } = computeTopValues(rows, COLUMNS, topN);
+      const elements = buildElements(rows, topValues, counts, minEdge);
+
+      document.getElementById("counts").textContent =
+        `${elements.nodes.length} nodes • ${elements.edges.length} edges`;
+
+      createCy(elements);
+
+      setStatus(`Loaded ${rows.length} rows. Showing top ${topN}/category, edges weight ≥ ${minEdge}.`);
+    } catch (e) {
+      console.error(e);
+      setStatus("Error: " + (e?.message || String(e)));
+      alert(e?.message || String(e));
+    }
+  }
+
+  function wireUI() {
+    const topN = document.getElementById("topN");
+    const topNLabel = document.getElementById("topNLabel");
+    topN.addEventListener("input", () => { topNLabel.textContent = topN.value; });
+    topN.addEventListener("change", rebuildGraph);
+
+    const minEdge = document.getElementById("minEdge");
+    const minEdgeLabel = document.getElementById("minEdgeLabel");
+    minEdge.addEventListener("input", () => { minEdgeLabel.textContent = minEdge.value; });
+    minEdge.addEventListener("change", rebuildGraph);
+
+    document.getElementById("resetBtn").addEventListener("click", () => setActiveType(null));
+    document.getElementById("fitBtn").addEventListener("click", () => cy && cy.fit(undefined, 30));
+    document.getElementById("reloadBtn").addEventListener("click", async () => {
+      cachedRows = null;
+      await rebuildGraph();
+    });
+  }
+
+  (async function main() {
+    initLegend();
+    wireUI();
+    await rebuildGraph();
+  })();
+</script>
+</body>
+</html>
