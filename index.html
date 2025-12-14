@@ -16,7 +16,7 @@
 
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    #wrap { display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
+    #wrap { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
     #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
     #cy { width: 100%; height: 100vh; }
 
@@ -28,8 +28,7 @@
     .row { display:flex; gap:8px; align-items:center; justify-content: space-between; }
     .pill {
       display:inline-block; padding:2px 8px; font-size:12px;
-      border:1px solid #ddd; border-radius:999px; color:#444;
-      white-space: nowrap;
+      border:1px solid #ddd; border-radius:999px; color:#444; white-space: nowrap;
     }
 
     .btnRow { display: grid; gap: 8px; margin-top: 10px; }
@@ -37,7 +36,6 @@
       padding:10px; border:1px solid #ddd; border-radius:10px;
       background:#fff; cursor:pointer; width: 100%;
     }
-    button.secondary:active{ transform: translateY(1px); }
 
     .legend { display: grid; gap: 8px; margin-top: 8px; }
     .legend button{
@@ -51,18 +49,36 @@
     .toggleRow { display:flex; align-items:center; gap:8px; margin-top: 10px; }
     input[type="checkbox"]{ transform: scale(1.1); }
 
-    .kpi { display:grid; gap:6px; margin-top:8px; }
-
     hr { border: none; border-top: 1px solid #eee; margin: 14px 0; }
 
-    .urlBox { display:grid; gap:6px; margin-top: 10px; }
-    input[type="text"]{
-      width:100%;
-      padding:10px;
-      border:1px solid #ddd;
-      border-radius:10px;
-      font-size: 12px;
+    .panel {
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
     }
+    .kv { display:flex; gap:8px; align-items:flex-start; justify-content: space-between; }
+    .kv .k { font-size: 12px; color:#666; }
+    .kv .v { font-size: 12px; color:#111; text-align:right; overflow-wrap:anywhere; }
+
+    .ok { color: #166534; font-weight: 700; }
+    .bad { color: #991b1b; font-weight: 700; }
+
+    .errorBox {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #f3c2c2;
+      background: #fff5f5;
+      border-radius: 10px;
+      display: none;
+    }
+    .errorTitle { font-weight: 700; font-size: 12px; margin-bottom: 6px; }
+    .errorText { font-size: 12px; color: #7a1f1f; white-space: pre-wrap; }
+
+    .small { font-size: 11px; color:#666; }
   </style>
 </head>
 
@@ -75,8 +91,8 @@
     </div>
 
     <p class="hint" style="margin-top:8px;">
-      Top <b>5</b> values per category (by frequency).<br>
-      Click nodes to focus their neighborhood. Shift+Click to multi-select. Click background to clear.
+      Top <b>5</b> values per category (by frequency). Click nodes to focus their neighborhood.
+      Shift+Click to multi-select. Click background to clear.
     </p>
 
     <div class="btnRow">
@@ -92,6 +108,29 @@
       <label for="edgeLabelsToggle" class="hint" style="margin:0;">Show edge labels (weight + $)</label>
     </div>
 
+    <div class="panel">
+      <div class="kv">
+        <div class="k">Connection</div>
+        <div class="v" id="connStatus">…</div>
+      </div>
+      <div class="kv">
+        <div class="k">HTTP</div>
+        <div class="v" id="httpStatus">…</div>
+      </div>
+      <div class="kv">
+        <div class="k">Detected headers</div>
+        <div class="v mono" id="headerList">…</div>
+      </div>
+      <div class="small">
+        Tip: open your CSV URL in a new tab — you should see/download raw CSV.
+      </div>
+    </div>
+
+    <div id="errorBox" class="errorBox">
+      <div class="errorTitle">Problem</div>
+      <div class="errorText" id="errorText"></div>
+    </div>
+
     <hr>
 
     <h3>Legend filter</h3>
@@ -100,22 +139,13 @@
 
     <hr>
 
-    <h3>Selection info</h3>
-    <div class="kpi">
-      <span id="selSummary" class="pill">No selection</span>
-      <div id="selDetails" class="hint"></div>
-    </div>
-
-    <hr>
-
     <h3>Status</h3>
     <p id="status" class="hint"></p>
 
     <hr>
 
-    <h3>Data source (edit once)</h3>
+    <h3>Data requirements</h3>
     <div class="hint">
-      Set <span class="mono">SHEET_CSV_URL</span> in the code below to your published CSV URL (Google Sheets → File → Share → Publish to web → CSV).
       Required headers:
       <div class="mono" style="margin-top:6px;">
         sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount
@@ -133,7 +163,6 @@
   const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv";
   // ===========================================
 
-  // Register fcose layout
   cytoscape.use(cytoscapeFcose);
 
   // ===== Config =====
@@ -162,11 +191,35 @@
   let activeType = null;
   let selectedNodeIds = new Set();
 
-  // ===== DOM helpers =====
+  // ===== DOM =====
   const $ = (id) => document.getElementById(id);
   function setStatus(msg) { $("status").textContent = msg || ""; }
 
-  // ===== Data helpers =====
+  function showError(text) {
+    $("errorBox").style.display = "block";
+    $("errorText").textContent = text || "";
+  }
+  function clearError() {
+    $("errorBox").style.display = "none";
+    $("errorText").textContent = "";
+  }
+
+  function setConn(ok, msg) {
+    $("connStatus").innerHTML = ok
+      ? `<span class="ok">Connected</span> — ${escapeHtml(msg || "")}`
+      : `<span class="bad">Failed</span> — ${escapeHtml(msg || "")}`;
+  }
+  function setHttp(msg) { $("httpStatus").textContent = msg || "—"; }
+  function setHeaders(list) { $("headerList").textContent = (list && list.length) ? list.join(", ") : "—"; }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  // ===== Helpers =====
   function normalize(v) {
     if (v == null) return "";
     const s = String(v).trim();
@@ -190,36 +243,74 @@
     return `${type}::${String(value)}`;
   }
 
-  // ===== CSV load (robust header trimming + BOM removal) =====
-  async function loadCSV(url) {
-    return new Promise((resolve, reject) => {
-      Papa.parse(url, {
-        header: true,
-        download: true,
-        skipEmptyLines: true,
-        transformHeader: (h) =>
-          (h ?? "")
-            .toString()
-            .replace(/^\uFEFF/, "")  // remove BOM if present
-            .trim(),
-        complete: (res) => resolve(res.data || []),
-        error: reject
-      });
-    });
+  function normalizeHeader(h) {
+    return (h ?? "").toString().replace(/^\uFEFF/, "").trim();
   }
 
-  function validateHeaders(rows) {
-    const first = rows[0] || {};
-    const keys = Object.keys(first)
-      .map(k => (k ?? "").toString().replace(/^\uFEFF/, "").trim())
+  // ===== Connection + header check (fetch + parse only header row) =====
+  async function connectAndInspect(url) {
+    clearError();
+    setConn(false, "Connecting…");
+    setHttp("…");
+    setHeaders([]);
+
+    let resp;
+    try {
+      resp = await fetch(url, { cache: "no-store" });
+    } catch (e) {
+      setConn(false, "Network/CORS blocked");
+      setHttp("fetch() failed");
+      throw new Error(
+        "Could not fetch the CSV URL.\n\n" +
+        "Common causes:\n" +
+        "• You opened index.html via file:// (double click). Use GitHub Pages or a local server.\n" +
+        "• The sheet is not published/public.\n" +
+        "• CORS blocked the request.\n\n" +
+        "Raw error: " + (e?.message || String(e))
+      );
+    }
+
+    setHttp(`${resp.status} ${resp.statusText}`);
+
+    if (!resp.ok) {
+      setConn(false, "HTTP error");
+      throw new Error(`HTTP error fetching CSV: ${resp.status} ${resp.statusText}`);
+    }
+
+    const text = await resp.text();
+
+    // Parse just enough to get headers + a first row
+    const parsed = Papa.parse(text, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: normalizeHeader
+    });
+
+    if (parsed.errors && parsed.errors.length) {
+      setConn(false, "Parse error");
+      throw new Error("CSV parse error: " + parsed.errors[0].message);
+    }
+
+    const first = parsed.data?.[0] || {};
+    const headers = Object.keys(first)
+      .map(normalizeHeader)
       .filter(k => k.length > 0);
 
+    setHeaders(headers);
+
+    // Mark connection as OK as soon as we successfully fetched + parsed
+    setConn(true, "Fetched & parsed CSV");
+
+    return { rows: parsed.data || [], headers };
+  }
+
+  function validateHeadersFromList(headers) {
     const required = [...COLUMNS, AMOUNT_COLUMN];
-    const missing = required.filter(h => !keys.includes(h));
+    const missing = required.filter(h => !headers.includes(h));
     if (missing.length) {
       throw new Error(
-        "Missing columns: " + missing.join(", ") +
-        "\nFound columns: " + keys.join(", ")
+        "Missing required columns:\n" + missing.join(", ") + "\n\n" +
+        "Found columns:\n" + headers.join(", ")
       );
     }
   }
@@ -228,7 +319,6 @@
   function initLegend() {
     const el = $("legend");
     el.innerHTML = "";
-
     for (const type of COLUMNS) {
       const btn = document.createElement("button");
       btn.dataset.type = type;
@@ -252,7 +342,6 @@
       b.classList.toggle("active", b.dataset.type === activeType);
     });
     applyFocusStyles();
-    updateSelectionPanel();
   }
 
   // ===== Build graph =====
@@ -294,21 +383,12 @@
 
         const id = nodeId(c, v);
         if (!nodes.has(id)) {
-          nodes.set(id, {
-            data: {
-              id,
-              label: v,
-              type: c,
-              count: counts[c].get(v) || 0,
-              amount_sum: 0
-            }
-          });
+          nodes.set(id, { data: { id, label: v, type: c, count: counts[c].get(v) || 0, amount_sum: 0 } });
         }
         nodes.get(id).data.amount_sum += amt;
         present.push(id);
       }
 
-      // pairwise edges within row
       for (let i=0; i<present.length; i++) {
         for (let j=i+1; j<present.length; j++) {
           const a = present[i], b = present[j];
@@ -324,7 +404,6 @@
       }
     }
 
-    // Add readable labels
     for (const e of edges.values()) {
       e.data.label = `w=${e.data.weight}  $=${fmtMoney(e.data.amount_sum)}`;
     }
@@ -332,7 +411,7 @@
     return { nodes: [...nodes.values()], edges: [...edges.values()] };
   }
 
-  // ===== Layout config =====
+  // ===== Layout =====
   function fcoseLayout({ spread }) {
     return {
       name: "fcose",
@@ -385,15 +464,6 @@
           }
         },
         {
-          selector: "node.selected",
-          style: {
-            "border-width": 3,
-            "border-color": "#111",
-            "width": 26,
-            "height": 26
-          }
-        },
-        {
           selector: "edge",
           style: {
             "curve-style": "bezier",
@@ -416,12 +486,13 @@
       layout: fcoseLayout({ spread: false })
     });
 
-    // Background click clears selection
     cy.on("tap", (evt) => {
-      if (evt.target === cy) clearSelection();
+      if (evt.target === cy) {
+        selectedNodeIds.clear();
+        applyFocusStyles();
+      }
     });
 
-    // Node click selection (Shift+Click toggles)
     cy.on("tap", "node", (evt) => {
       const n = evt.target;
       const isShift = evt.originalEvent && evt.originalEvent.shiftKey;
@@ -435,43 +506,24 @@
       }
 
       applyFocusStyles();
-      updateSelectionPanel();
       cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.15) }, { duration: 200 });
     });
 
-    // Box selection -> convert to our set
-    cy.on("boxend", () => {
-      const sels = cy.nodes(":selected");
-      if (!sels.length) return;
-      selectedNodeIds.clear();
-      sels.forEach(n => selectedNodeIds.add(n.id()));
-      cy.nodes().unselect();
-      applyFocusStyles();
-      updateSelectionPanel();
-    });
-
-    // Edge label toggle
     $("edgeLabelsToggle").addEventListener("change", () => {
       if (!cy) return;
       cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
     });
     cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
 
-    // Initial panel
-    updateSelectionPanel();
     return cy;
   }
 
-  // ===== Focus / muting =====
   function applyFocusStyles() {
     if (!cy) return;
-
     cy.elements().removeClass("muted");
-    cy.nodes().removeClass("selected");
 
     const hasSelection = selectedNodeIds.size > 0;
     const hasType = !!activeType;
-
     if (!hasSelection && !hasType) return;
 
     cy.elements().addClass("muted");
@@ -482,73 +534,12 @@
         const n = cy.getElementById(id);
         if (n && !n.empty()) keep = keep.union(n.closedNeighborhood());
       }
-      for (const id of selectedNodeIds) {
-        const n = cy.getElementById(id);
-        if (n && !n.empty()) n.removeClass("muted").addClass("selected");
-      }
     } else if (hasType) {
       const typeNodes = cy.nodes().filter(n => n.data("type") === activeType);
       keep = keep.union(typeNodes).union(typeNodes.connectedEdges()).union(typeNodes.neighborhood("node"));
     }
 
     keep.removeClass("muted");
-  }
-
-  function clearSelection() {
-    selectedNodeIds.clear();
-    if (!cy) return;
-    cy.nodes().removeClass("selected");
-    applyFocusStyles();
-    updateSelectionPanel();
-  }
-
-  function resetAll() {
-    activeType = null;
-    document.querySelectorAll("#legend button").forEach(b => b.classList.remove("active"));
-    clearSelection();
-    if (cy) cy.elements().removeClass("muted");
-    updateSelectionPanel();
-  }
-
-  // ===== Selection panel =====
-  function updateSelectionPanel() {
-    const summary = $("selSummary");
-    const details = $("selDetails");
-
-    if (!cy || selectedNodeIds.size === 0) {
-      summary.textContent = activeType ? `Type filter: ${activeType}` : "No selection";
-      details.textContent = activeType
-        ? "Click nodes to focus their connections (Shift+Click for multi-select)."
-        : "Click a node to see its neighborhood and totals.";
-      return;
-    }
-
-    const nodes = [...selectedNodeIds]
-      .map(id => cy.getElementById(id))
-      .filter(n => n && !n.empty());
-
-    const hood = nodes.reduce((acc, n) => acc.union(n.closedNeighborhood()), cy.collection());
-    const hoodNodes = hood.nodes();
-    const hoodEdges = hood.edges();
-
-    let edgeAmount = 0;
-    let edgeWeight = 0;
-    hoodEdges.forEach(e => {
-      edgeAmount += (e.data("amount_sum") || 0);
-      edgeWeight += (e.data("weight") || 0);
-    });
-
-    summary.textContent = `${nodes.length} selected • neighborhood: ${hoodNodes.length} nodes, ${hoodEdges.length} edges`;
-
-    const related = hoodNodes
-      .filter(n => !selectedNodeIds.has(n.id()))
-      .map(n => `${n.data("label")} (${n.data("type")})`)
-      .slice(0, 12);
-
-    details.innerHTML = `
-      <div><b>Edge totals:</b> w=${edgeWeight} • $=${fmtMoney(edgeAmount)}</div>
-      <div style="margin-top:6px;"><b>Related:</b> ${related.length ? related.join(", ") : "—"}${(hoodNodes.length - nodes.length) > 12 ? " …" : ""}</div>
-    `;
   }
 
   // ===== Main =====
@@ -558,40 +549,29 @@
     $("fitBtn").addEventListener("click", () => cy && cy.fit(undefined, 40));
     $("relayoutBtn").addEventListener("click", () => runRelayout(false));
     $("spreadBtn").addEventListener("click", () => runRelayout(true));
-    $("clearSelBtn").addEventListener("click", clearSelection);
-    $("resetBtn").addEventListener("click", resetAll);
-
-    if (!SHEET_CSV_URL)
-    {
-      setStatus("Set SHEET_CSV_URL in the code (top of <script>) to your published CSV URL.");
-      return;
-    }
+    $("clearSelBtn").addEventListener("click", () => { selectedNodeIds.clear(); applyFocusStyles(); });
+    $("resetBtn").addEventListener("click", () => { activeType = null; selectedNodeIds.clear(); applyFocusStyles(); });
 
     try {
-      setStatus("Loading CSV…");
-      const rows = await loadCSV(SHEET_CSV_URL);
+      setStatus("Connecting + inspecting headers…");
+      const { rows, headers } = await connectAndInspect(SHEET_CSV_URL);
 
-      if (!rows.length) {
-        setStatus("No rows found in CSV.");
-        return;
-      }
+      // Validate headers and show a nice error if wrong
+      validateHeadersFromList(headers);
 
-      validateHeaders(rows);
-
-      setStatus("Computing top values & building graph…");
+      setStatus("Building graph…");
       const { top, counts } = computeTopValues(rows);
       const elements = buildElements(rows, top, counts);
-
       $("counts").textContent = `${elements.nodes.length} nodes • ${elements.edges.length} edges`;
 
       setStatus("Rendering…");
       createCy(elements);
 
-      setStatus(`Loaded ${rows.length} rows • top ${TOP_N}/category • click nodes to explore`);
+      setStatus(`Loaded ${rows.length} rows • top ${TOP_N}/category`);
     } catch (e) {
       console.error(e);
-      setStatus("Error: " + (e?.message || String(e)));
-      alert(e?.message || String(e));
+      showError(e?.message || String(e));
+      setStatus("Failed. See error box.");
     }
   }
 
