@@ -5,92 +5,109 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Relationship Graph</title>
 
-  <!-- Cytoscape -->
+  <!-- Cytoscape core -->
   <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 
-  <!-- PapaParse -->
+  <!-- Better layout for spacing (fcose) -->
+  <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+
+  <!-- CSV parsing -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    #wrap { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    #wrap { display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
     #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
     #cy { width: 100%; height: 100vh; }
 
-    .legend { display: grid; gap: 8px; margin-top: 12px; }
-    .legend button {
-      display: flex; align-items: center; gap: 10px;
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #ddd;
-      background: #fff;
-      border-radius: 10px;
-      cursor: pointer;
-      text-align: left;
-    }
-    .legend button.active {
-      outline: 3px solid #000;
-      outline-offset: 2px;
-    }
-    .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
-    .muted { opacity: 0.12; }
-
-    .pill {
-      display:inline-block;
-      padding:2px 8px;
-      font-size:12px;
-      border:1px solid #ddd;
-      border-radius:999px;
-      color:#444;
-      margin-left: 6px;
-    }
+    h2 { margin: 0; }
+    h3 { margin: 12px 0 6px; font-size: 14px; }
     .hint { font-size: 12px; color: #666; line-height: 1.4; }
-    button.secondary {
-      padding:10px;
-      border:1px solid #ddd;
-      border-radius:10px;
-      background:#fff;
-      cursor:pointer;
-      width: 100%;
+    .pill {
+      display:inline-block; padding:2px 8px; font-size:12px;
+      border:1px solid #ddd; border-radius:999px; color:#444;
     }
-    .btnRow { display:grid; gap:8px; margin-top:10px; }
+
+    .btnRow { display: grid; gap: 8px; margin-top: 10px; }
+    button.secondary{
+      padding:10px; border:1px solid #ddd; border-radius:10px;
+      background:#fff; cursor:pointer; width: 100%;
+    }
+    button.secondary:active{ transform: translateY(1px); }
+
+    .legend { display: grid; gap: 8px; margin-top: 8px; }
+    .legend button{
+      display:flex; align-items:center; gap:10px; width:100%;
+      padding:10px; border:1px solid #ddd; background:#fff;
+      border-radius:10px; cursor:pointer; text-align:left;
+    }
+    .legend button.active { outline: 3px solid #000; outline-offset: 2px; }
+    .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
+
+    .row { display:flex; gap:8px; align-items:center; justify-content: space-between; }
+    .kpi { display:grid; gap:6px; margin-top:8px; }
+
+    .toggleRow { display:flex; align-items:center; gap:8px; }
+    input[type="checkbox"]{ transform: scale(1.1); }
+
+    hr { border: none; border-top: 1px solid #eee; margin: 14px 0; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
   </style>
 </head>
 
 <body>
 <div id="wrap">
   <aside id="sidebar">
-    <h2 style="margin:0;">Graph</h2>
-    <div style="margin-top:6px;">
+    <div class="row">
+      <h2>Graph</h2>
       <span id="counts" class="pill">…</span>
     </div>
 
-    <p class="hint" style="margin-top:10px;">
-      Top 5 values per category. Click a legend item to highlight nodes of that type.
-      Use <b>Spread out</b> if the graph is clustered.
+    <p class="hint" style="margin-top:8px;">
+      Shows <b>top 5</b> values per category (by frequency).<br>
+      <b>Click</b> a node to focus its neighbors.<br>
+      <b>Shift+Click</b> to multi-select. Click background to clear.
     </p>
 
     <div class="btnRow">
-      <button id="resetBtn" class="secondary">Reset</button>
+      <button id="fitBtn" class="secondary">Fit</button>
+      <button id="relayoutBtn" class="secondary">Re-layout</button>
       <button id="spreadBtn" class="secondary">Spread out</button>
-      <button id="stopBtn" class="secondary">Stop layout</button>
-      <button id="fitBtn" class="secondary">Fit to screen</button>
+      <button id="clearSelBtn" class="secondary">Clear selection</button>
+      <button id="resetBtn" class="secondary">Reset all filters</button>
     </div>
 
-    <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
+    <div style="margin-top:10px;" class="toggleRow">
+      <input id="edgeLabelsToggle" type="checkbox" checked />
+      <label for="edgeLabelsToggle" class="hint" style="margin:0;">Show edge labels (weight + $)</label>
+    </div>
 
-    <h3 style="margin:0 0 6px 0; font-size:14px;">Legend</h3>
+    <hr>
+
+    <h3>Legend filter</h3>
+    <div class="hint">Click a type to highlight that column’s nodes.</div>
     <div class="legend" id="legend"></div>
 
-    <p id="status" class="hint" style="margin-top:10px;"></p>
+    <hr>
 
-    <hr style="border:none;border-top:1px solid #eee;margin:14px 0;" />
+    <h3>Selection info</h3>
+    <div class="kpi">
+      <span id="selSummary" class="pill">No selection</span>
+      <div id="selDetails" class="hint"></div>
+    </div>
+
+    <hr>
+
+    <h3>Status</h3>
+    <p id="status" class="hint"></p>
+
+    <hr>
 
     <p class="hint">
-      <b>Data requirements:</b><br/>
-      Your published CSV must include headers:<br/>
-      <code>sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount</code>
+      <b>Required headers:</b><br>
+      <span class="mono">sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount</span><br>
+      Use a <b>published CSV</b> URL (Google Sheets → File → Share → Publish to web → CSV).
     </p>
   </aside>
 
@@ -100,13 +117,12 @@
 </div>
 
 <script>
-  // ========= CONFIG =========
-  // Use a PUBLISHED Google Sheets CSV URL:
-  // Google Sheets → File → Share → Publish to web → CSV
-  // Example: https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
-  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv";
+  // Register fcose
+  cytoscape.use(cytoscapeFcose);
 
-  // Must match CSV headers exactly
+  // ========= CONFIG =========
+  const SHEET_CSV_URL = "PASTE_YOUR_PUBLISHED_CSV_URL_HERE";
+
   const COLUMNS = [
     "sender_name",
     "sender_agent",
@@ -131,14 +147,13 @@
   // ========= STATE =========
   let cy = null;
   let activeType = null;
+  let selectedNodeIds = new Set(); // multi-select
+
+  // ========= DOM =========
+  const $ = (id) => document.getElementById(id);
+  function setStatus(msg){ $("status").textContent = msg || ""; }
 
   // ========= HELPERS =========
-  const $ = (id) => document.getElementById(id);
-
-  function setStatus(msg) {
-    $("status").textContent = msg || "";
-  }
-
   function normalize(v) {
     if (v == null) return "";
     const s = String(v).trim();
@@ -153,6 +168,16 @@
     return Number.isFinite(n) ? n : 0;
   }
 
+  function fmtMoney(n) {
+    const num = Number(n) || 0;
+    return "$" + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function nodeId(type, value) {
+    return `${type}::${String(value)}`;
+  }
+
+  // ========= LEGEND =========
   function initLegend() {
     const el = $("legend");
     el.innerHTML = "";
@@ -169,45 +194,29 @@
       label.textContent = type;
 
       btn.append(sw, label);
-      btn.onclick = () => toggleType(type);
+      btn.addEventListener("click", () => toggleType(type));
       el.appendChild(btn);
     }
   }
 
   function toggleType(type) {
-    // If called with null, reset.
-    if (!type) activeType = null;
-    else activeType = (activeType === type ? null : type);
+    activeType = (activeType === type ? null : type);
 
-    document.querySelectorAll(".legend button").forEach(b => {
+    document.querySelectorAll("#legend button").forEach(b => {
       b.classList.toggle("active", b.dataset.type === activeType);
     });
 
-    if (!cy) return;
-
-    if (!activeType) {
-      cy.elements().removeClass("muted");
-      return;
-    }
-
-    cy.nodes().forEach(n => {
-      n.toggleClass("muted", n.data("type") !== activeType);
-    });
-
-    cy.edges().forEach(e => {
-      const s = e.source().data("type");
-      const t = e.target().data("type");
-      e.toggleClass("muted", s !== activeType && t !== activeType);
-    });
+    applyFocusStyles();
   }
 
-  async function loadCSV() {
+  // ========= DATA LOAD =========
+  async function loadCSV(url) {
     return new Promise((resolve, reject) => {
-      Papa.parse(SHEET_CSV_URL, {
+      Papa.parse(url, {
         header: true,
         download: true,
         skipEmptyLines: true,
-        complete: res => resolve(res.data || []),
+        complete: (res) => resolve(res.data || []),
         error: reject
       });
     });
@@ -217,155 +226,372 @@
     const first = rows[0] || {};
     const required = [...COLUMNS, AMOUNT_COLUMN];
     const missing = required.filter(h => !(h in first));
-    if (missing.length) {
-      throw new Error("Missing columns: " + missing.join(", "));
-    }
+    if (missing.length) throw new Error("Missing columns: " + missing.join(", "));
   }
 
-  function buildGraph(rows) {
-    // Count frequency per column for top-N selection
+  // ========= GRAPH BUILD =========
+  function computeTopValues(rows) {
     const counts = {};
-    COLUMNS.forEach(c => counts[c] = new Map());
+    for (const c of COLUMNS) counts[c] = new Map();
 
-    rows.forEach(r => {
-      COLUMNS.forEach(c => {
+    for (const r of rows) {
+      for (const c of COLUMNS) {
         const v = normalize(r[c]);
-        if (!v) return;
+        if (!v) continue;
         counts[c].set(v, (counts[c].get(v) || 0) + 1);
-      });
-    });
+      }
+    }
 
-    // Compute top-N values per category
     const top = {};
-    COLUMNS.forEach(c => {
+    for (const c of COLUMNS) {
       top[c] = new Set(
         [...counts[c].entries()]
-          .sort((a, b) => b[1] - a[1])
+          .sort((a,b) => b[1] - a[1])
           .slice(0, TOP_N)
           .map(([val]) => val)
       );
-    });
+    }
+    return { top, counts };
+  }
 
+  function buildElements(rows, top, counts) {
     const nodes = new Map();
     const edges = new Map();
 
-    rows.forEach(r => {
+    for (const r of rows) {
       const amt = toNumber(r[AMOUNT_COLUMN]);
       const present = [];
 
-      COLUMNS.forEach(c => {
+      for (const c of COLUMNS) {
         const v = normalize(r[c]);
-        if (!v || !top[c].has(v)) return;
+        if (!v || !top[c].has(v)) continue;
 
-        const id = `${c}::${v}`;
-
+        const id = nodeId(c, v);
         if (!nodes.has(id)) {
-          nodes.set(id, { data: { id, label: v, type: c, amount: 0 } });
+          nodes.set(id, {
+            data: {
+              id,
+              label: v,
+              type: c,
+              count: counts[c].get(v) || 0,
+              amount_sum: 0
+            }
+          });
         }
-        // Node total amount across rows it appears in
-        nodes.get(id).data.amount += amt;
-
+        nodes.get(id).data.amount_sum += amt;
         present.push(id);
-      });
+      }
 
-      // Create pairwise edges for values that co-occur in this row
-      for (let i = 0; i < present.length; i++) {
-        for (let j = i + 1; j < present.length; j++) {
+      // pairwise edges within the row
+      for (let i=0; i<present.length; i++) {
+        for (let j=i+1; j<present.length; j++) {
           const a = present[i], b = present[j];
-          const key = (a < b) ? `${a}__${b}` : `${b}__${a}`;
-
+          const [s,t] = (a < b) ? [a,b] : [b,a];
+          const key = `${s}__${t}`;
           if (!edges.has(key)) {
-            edges.set(key, { data: { id: key, source: a, target: b, weight: 0, amount: 0 } });
+            edges.set(key, { data: { id:key, source:s, target:t, weight:0, amount_sum:0 } });
           }
-          edges.get(key).data.weight += 1;
-          edges.get(key).data.amount += amt;
+          const e = edges.get(key).data;
+          e.weight += 1;
+          e.amount_sum += amt;
         }
       }
-    });
+    }
 
-    return { nodes: [...nodes.values()], edges: [...edges.values()] };
+    // Create computed edge labels
+    for (const e of edges.values()) {
+      e.data.label = `w=${e.data.weight}  $=${fmtMoney(e.data.amount_sum)}`;
+    }
+
+    return { nodes:[...nodes.values()], edges:[...edges.values()] };
   }
 
-  function render(graph) {
+  // ========= RENDER =========
+  function createCy(elements) {
     if (cy) cy.destroy();
 
     cy = cytoscape({
       container: $("cy"),
-      elements: [...graph.nodes, ...graph.edges],
+      elements: [...elements.nodes, ...elements.edges],
+
+      // Better multi-select UX
+      boxSelectionEnabled: true,
+      selectionType: "additive",
+
       style: [
+        // Nodes
         {
           selector: "node",
           style: {
-            "background-color": e => TYPE_COLORS[e.data("type")] || "#999",
+            "background-color": ele => TYPE_COLORS[ele.data("type")] || "#999",
             "label": "data(label)",
             "font-size": 10,
-            "text-outline-width": 2,
+            "text-wrap": "wrap",
+            "text-max-width": 110,
+            "text-valign": "center",
+            "text-halign": "center",
+            "color": "#111",
             "text-outline-color": "#fff",
-            "width": 18,
-            "height": 18
+            "text-outline-width": 2,
+            "width": 22,
+            "height": 22,
+            "border-width": 0
           }
         },
+
+        // Selected nodes (visual toggle)
+        {
+          selector: "node.selected",
+          style: {
+            "border-width": 3,
+            "border-color": "#111",
+            "width": 26,
+            "height": 26
+          }
+        },
+
+        // Edges
         {
           selector: "edge",
           style: {
-            "width": e => Math.min(1 + e.data("weight"), 8),
-            "opacity": 0.35,
+            "curve-style": "bezier",
+            "opacity": 0.40,
             "line-color": "#999",
-            "curve-style": "bezier"
+            "width": ele => Math.min(1 + ele.data("weight"), 8),
+
+            // labels
+            "label": "data(label)",
+            "font-size": 9,
+            "color": "#111",
+            "text-rotation": "autorotate",
+            "text-margin-y": -8,
+            "text-background-color": "#fff",
+            "text-background-opacity": 0.85,
+            "text-background-padding": 2
           }
         },
-        { selector: ".muted", style: { "opacity": 0.12 } }
+
+        // Muted
+        { selector: ".muted", style: { "opacity": 0.10 } },
+
+        // When labels are off
+        { selector: ".hideEdgeLabels", style: { "label": "" } }
       ],
-      layout: {
-        name: "cose",
-        animate: true,
-        randomize: true,
-        padding: 40
+
+      // Initial layout: fcose for minimal overlap
+      layout: fcoseLayout({ spread: false })
+    });
+
+    // Click behavior:
+    // - click node: select (single) unless shift held, then toggle in multi-select set
+    // - click background: clear selection
+    cy.on("tap", (evt) => {
+      if (evt.target === cy) {
+        clearSelection();
+        return;
       }
     });
 
-    // Click node to center it
     cy.on("tap", "node", (evt) => {
       const n = evt.target;
-      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
+      const isShift = evt.originalEvent && evt.originalEvent.shiftKey;
+
+      if (!isShift) {
+        // single select
+        selectedNodeIds.clear();
+        selectedNodeIds.add(n.id());
+      } else {
+        // toggle in set
+        if (selectedNodeIds.has(n.id())) selectedNodeIds.delete(n.id());
+        else selectedNodeIds.add(n.id());
+      }
+
+      applyFocusStyles();
+      updateSelectionPanel();
+
+      // center gently
+      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.15) }, { duration: 200 });
     });
+
+    // If user box-selects nodes, we treat them as selected too
+    cy.on("boxend", () => {
+      const sels = cy.nodes(":selected");
+      if (sels.length) {
+        selectedNodeIds.clear();
+        sels.forEach(n => selectedNodeIds.add(n.id()));
+        // clear Cytoscape's native selection highlight and use ours
+        cy.nodes().unselect();
+        applyFocusStyles();
+        updateSelectionPanel();
+      }
+    });
+
+    // Toggle edge labels
+    $("edgeLabelsToggle").addEventListener("change", () => {
+      if (!cy) return;
+      cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
+    });
+
+    // Start with labels on (if checked)
+    cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
+
+    return cy;
   }
 
-  // ======= Layout controls =======
-  function spreadOut() {
-    if (!cy) return;
-
-    cy.layout({
-      name: "cose",
+  // fcose config
+  function fcoseLayout({ spread }) {
+    // spread=true => more spacing, slightly slower
+    return {
+      name: "fcose",
       animate: true,
-      randomize: true,
-      padding: 50,
-      // stronger separation (bigger = more spacing)
-      nodeRepulsion: 20000,
-      idealEdgeLength: 140,
-      edgeElasticity: 0.1,
-      numIter: 1000
-    }).run();
+      animationDuration: 900,
+      fit: true,
+      padding: 60,
+
+      // These reduce overlap / make it readable
+      nodeSeparation: spread ? 140 : 90,
+      idealEdgeLength: spread ? 220 : 140,
+      nodeRepulsion: spread ? 18000 : 12000,
+      gravity: 0.18,
+
+      // Collision handling
+      packComponents: true,
+      quality: "default",
+
+      // Performance
+      numIter: spread ? 2400 : 1600
+    };
   }
 
-  function stopLayout() {
+  function runRelayout(spread) {
     if (!cy) return;
     cy.stop();
+    cy.nodes().unlock();
+    cy.layout(fcoseLayout({ spread })).run();
   }
 
-  function fitToScreen() {
+  // ========= FOCUS / MUTING =========
+  function applyFocusStyles() {
     if (!cy) return;
-    cy.fit(undefined, 30);
+
+    // reset classes
+    cy.elements().removeClass("muted");
+    cy.nodes().removeClass("selected");
+
+    // If nothing selected and no legend filter => no muting
+    const hasSelection = selectedNodeIds.size > 0;
+    const hasType = !!activeType;
+
+    if (!hasSelection && !hasType) return;
+
+    // 1) Start muted
+    cy.elements().addClass("muted");
+
+    // 2) Build a "keep visible" set:
+    // - if selection exists: union of each selected node's closed neighborhood
+    // - else: keep nodes matching the active type + incident edges
+    let keep = cy.collection();
+
+    if (hasSelection) {
+      for (const id of selectedNodeIds) {
+        const n = cy.getElementById(id);
+        if (n && !n.empty()) keep = keep.union(n.closedNeighborhood());
+      }
+      // Mark selected nodes
+      for (const id of selectedNodeIds) {
+        const n = cy.getElementById(id);
+        if (n && !n.empty()) n.removeClass("muted").addClass("selected");
+      }
+    } else if (hasType) {
+      const typeNodes = cy.nodes().filter(n => n.data("type") === activeType);
+      keep = keep.union(typeNodes);
+      keep = keep.union(typeNodes.connectedEdges());
+      keep = keep.union(typeNodes.neighborhood("node")); // show immediate neighbors too
+    }
+
+    // 3) Unmute keep
+    keep.removeClass("muted");
+
+    // 4) If legend filter is active AND selection is active, also respect legend filter mildly:
+    // Keep selection neighborhood always visible, but slightly dim nodes not matching type.
+    if (hasSelection && hasType) {
+      cy.nodes().forEach(n => {
+        const inKeep = keep.contains(n);
+        if (!inKeep) return;
+        // if it's visible but not matching type, leave it visible (not muted).
+        // (You can change this to "soft dim" if you want.)
+      });
+    }
+  }
+
+  function clearSelection() {
+    selectedNodeIds.clear();
+    if (cy) {
+      cy.nodes().removeClass("selected");
+      applyFocusStyles();
+    }
+    updateSelectionPanel();
+  }
+
+  function resetAll() {
+    activeType = null;
+    document.querySelectorAll("#legend button").forEach(b => b.classList.remove("active"));
+    clearSelection();
+    if (cy) {
+      cy.elements().removeClass("muted");
+    }
+    updateSelectionPanel();
+  }
+
+  // ========= SELECTION PANEL =========
+  function updateSelectionPanel() {
+    const summary = $("selSummary");
+    const details = $("selDetails");
+
+    if (!cy || selectedNodeIds.size === 0) {
+      summary.textContent = activeType ? `Type filter: ${activeType}` : "No selection";
+      details.textContent = activeType
+        ? "Click nodes to focus their connections (Shift+Click for multi-select)."
+        : "Click a node to see all related nodes and totals.";
+      return;
+    }
+
+    const nodes = [...selectedNodeIds].map(id => cy.getElementById(id)).filter(n => n && !n.empty());
+    const hood = nodes.reduce((acc, n) => acc.union(n.closedNeighborhood()), cy.collection());
+    const hoodNodes = hood.nodes();
+    const hoodEdges = hood.edges();
+
+    // totals
+    let edgeAmount = 0;
+    let edgeWeight = 0;
+    hoodEdges.forEach(e => {
+      edgeAmount += (e.data("amount_sum") || 0);
+      edgeWeight += (e.data("weight") || 0);
+    });
+
+    summary.textContent = `${nodes.length} selected • neighborhood: ${hoodNodes.length} nodes, ${hoodEdges.length} edges`;
+
+    // list related nodes (short)
+    const related = hoodNodes
+      .filter(n => !selectedNodeIds.has(n.id()))
+      .map(n => `${n.data("label")} (${n.data("type")})`)
+      .slice(0, 12);
+
+    details.innerHTML = `
+      <div><b>Edge totals:</b> w=${edgeWeight} • $=${fmtMoney(edgeAmount)}</div>
+      <div style="margin-top:6px;"><b>Related:</b> ${related.length ? related.join(", ") : "—"}${hoodNodes.length - nodes.length > 12 ? " …" : ""}</div>
+    `;
   }
 
   // ========= MAIN =========
   async function main() {
     initLegend();
 
-    $("resetBtn").onclick = () => toggleType(null);
-    $("spreadBtn").onclick = spreadOut;
-    $("stopBtn").onclick = stopLayout;
-    $("fitBtn").onclick = fitToScreen;
+    $("fitBtn").addEventListener("click", () => cy && cy.fit(undefined, 40));
+    $("relayoutBtn").addEventListener("click", () => runRelayout(false));
+    $("spreadBtn").addEventListener("click", () => runRelayout(true));
+    $("clearSelBtn").addEventListener("click", clearSelection);
+    $("resetBtn").addEventListener("click", resetAll);
 
     if (!SHEET_CSV_URL || SHEET_CSV_URL.includes("PASTE_YOUR_PUBLISHED")) {
       setStatus("Paste your published Google Sheets CSV URL into SHEET_CSV_URL in index.html.");
@@ -374,27 +600,22 @@
 
     try {
       setStatus("Loading CSV…");
-      const rows = await loadCSV();
-
-      if (!rows.length) {
-        setStatus("No rows found in CSV.");
-        return;
-      }
+      const rows = await loadCSV(SHEET_CSV_URL);
+      if (!rows.length) { setStatus("No rows found in CSV."); return; }
 
       validateHeaders(rows);
 
-      const graph = buildGraph(rows);
+      setStatus("Computing top values & building graph…");
+      const { top, counts } = computeTopValues(rows);
+      const elements = buildElements(rows, top, counts);
 
-      $("counts").textContent = `${graph.nodes.length} nodes • ${graph.edges.length} edges`;
+      $("counts").textContent = `${elements.nodes.length} nodes • ${elements.edges.length} edges`;
 
-      render(graph);
+      setStatus("Rendering…");
+      createCy(elements);
+      updateSelectionPanel();
 
-      setStatus(`Loaded ${rows.length} rows • showing top ${TOP_N} per category`);
-
-      // If it's dense, run a stronger layout once after initial render
-      if (graph.nodes.length > 20 && graph.edges.length > 30) {
-        spreadOut();
-      }
+      setStatus(`Loaded ${rows.length} rows • top ${TOP_N}/category • click nodes to explore`);
     } catch (e) {
       console.error(e);
       setStatus("Error: " + (e?.message || String(e)));
