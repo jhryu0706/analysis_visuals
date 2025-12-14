@@ -8,14 +8,14 @@
   <!-- Cytoscape core -->
   <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 
-  <!-- Better layout for spacing (fcose) -->
+  <!-- fcose layout -->
   <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
 
   <!-- CSV parsing -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     #wrap { display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
     #sidebar { border-right: 1px solid #ddd; padding: 14px; overflow: auto; }
     #cy { width: 100%; height: 100vh; }
@@ -23,9 +23,13 @@
     h2 { margin: 0; }
     h3 { margin: 12px 0 6px; font-size: 14px; }
     .hint { font-size: 12px; color: #666; line-height: 1.4; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .row { display:flex; gap:8px; align-items:center; justify-content: space-between; }
     .pill {
       display:inline-block; padding:2px 8px; font-size:12px;
       border:1px solid #ddd; border-radius:999px; color:#444;
+      white-space: nowrap;
     }
 
     .btnRow { display: grid; gap: 8px; margin-top: 10px; }
@@ -44,15 +48,21 @@
     .legend button.active { outline: 3px solid #000; outline-offset: 2px; }
     .swatch { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
 
-    .row { display:flex; gap:8px; align-items:center; justify-content: space-between; }
-    .kpi { display:grid; gap:6px; margin-top:8px; }
-
-    .toggleRow { display:flex; align-items:center; gap:8px; }
+    .toggleRow { display:flex; align-items:center; gap:8px; margin-top: 10px; }
     input[type="checkbox"]{ transform: scale(1.1); }
 
+    .kpi { display:grid; gap:6px; margin-top:8px; }
+
     hr { border: none; border-top: 1px solid #eee; margin: 14px 0; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .urlBox { display:grid; gap:6px; margin-top: 10px; }
+    input[type="text"]{
+      width:100%;
+      padding:10px;
+      border:1px solid #ddd;
+      border-radius:10px;
+      font-size: 12px;
+    }
   </style>
 </head>
 
@@ -65,9 +75,8 @@
     </div>
 
     <p class="hint" style="margin-top:8px;">
-      Shows <b>top 5</b> values per category (by frequency).<br>
-      <b>Click</b> a node to focus its neighbors.<br>
-      <b>Shift+Click</b> to multi-select. Click background to clear.
+      Top <b>5</b> values per category (by frequency).<br>
+      Click nodes to focus their neighborhood. Shift+Click to multi-select. Click background to clear.
     </p>
 
     <div class="btnRow">
@@ -75,10 +84,10 @@
       <button id="relayoutBtn" class="secondary">Re-layout</button>
       <button id="spreadBtn" class="secondary">Spread out</button>
       <button id="clearSelBtn" class="secondary">Clear selection</button>
-      <button id="resetBtn" class="secondary">Reset all filters</button>
+      <button id="resetBtn" class="secondary">Reset filters</button>
     </div>
 
-    <div style="margin-top:10px;" class="toggleRow">
+    <div class="toggleRow">
       <input id="edgeLabelsToggle" type="checkbox" checked />
       <label for="edgeLabelsToggle" class="hint" style="margin:0;">Show edge labels (weight + $)</label>
     </div>
@@ -104,11 +113,14 @@
 
     <hr>
 
-    <p class="hint">
-      <b>Required headers:</b><br>
-      <span class="mono">sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount</span><br>
-      Use a <b>published CSV</b> URL (Google Sheets → File → Share → Publish to web → CSV).
-    </p>
+    <h3>Data source (edit once)</h3>
+    <div class="hint">
+      Set <span class="mono">SHEET_CSV_URL</span> in the code below to your published CSV URL (Google Sheets → File → Share → Publish to web → CSV).
+      Required headers:
+      <div class="mono" style="margin-top:6px;">
+        sender_name, sender_agent, sender_operator, payee_name, payee_agent, payee_operator, amount
+      </div>
+    </div>
   </aside>
 
   <main>
@@ -117,12 +129,14 @@
 </div>
 
 <script>
-  // Register fcose
+  // ========= ONE PLACE TO SET YOUR URL =========
+  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv";
+  // ===========================================
+
+  // Register fcose layout
   cytoscape.use(cytoscapeFcose);
 
-  // ========= CONFIG =========
-  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv"
-  
+  // ===== Config =====
   const COLUMNS = [
     "sender_name",
     "sender_agent",
@@ -131,7 +145,6 @@
     "payee_agent",
     "payee_operator"
   ];
-
   const AMOUNT_COLUMN = "amount";
   const TOP_N = 5;
 
@@ -144,16 +157,16 @@
     payee_operator: "#8c564b"
   };
 
-  // ========= STATE =========
+  // ===== State =====
   let cy = null;
   let activeType = null;
-  let selectedNodeIds = new Set(); // multi-select
+  let selectedNodeIds = new Set();
 
-  // ========= DOM =========
+  // ===== DOM helpers =====
   const $ = (id) => document.getElementById(id);
-  function setStatus(msg){ $("status").textContent = msg || ""; }
+  function setStatus(msg) { $("status").textContent = msg || ""; }
 
-  // ========= HELPERS =========
+  // ===== Data helpers =====
   function normalize(v) {
     if (v == null) return "";
     const s = String(v).trim();
@@ -177,7 +190,41 @@
     return `${type}::${String(value)}`;
   }
 
-  // ========= LEGEND =========
+  // ===== CSV load (robust header trimming + BOM removal) =====
+  async function loadCSV(url) {
+    return new Promise((resolve, reject) => {
+      Papa.parse(url, {
+        header: true,
+        download: true,
+        skipEmptyLines: true,
+        transformHeader: (h) =>
+          (h ?? "")
+            .toString()
+            .replace(/^\uFEFF/, "")  // remove BOM if present
+            .trim(),
+        complete: (res) => resolve(res.data || []),
+        error: reject
+      });
+    });
+  }
+
+  function validateHeaders(rows) {
+    const first = rows[0] || {};
+    const keys = Object.keys(first)
+      .map(k => (k ?? "").toString().replace(/^\uFEFF/, "").trim())
+      .filter(k => k.length > 0);
+
+    const required = [...COLUMNS, AMOUNT_COLUMN];
+    const missing = required.filter(h => !keys.includes(h));
+    if (missing.length) {
+      throw new Error(
+        "Missing columns: " + missing.join(", ") +
+        "\nFound columns: " + keys.join(", ")
+      );
+    }
+  }
+
+  // ===== Legend =====
   function initLegend() {
     const el = $("legend");
     el.innerHTML = "";
@@ -201,35 +248,14 @@
 
   function toggleType(type) {
     activeType = (activeType === type ? null : type);
-
     document.querySelectorAll("#legend button").forEach(b => {
       b.classList.toggle("active", b.dataset.type === activeType);
     });
-
     applyFocusStyles();
+    updateSelectionPanel();
   }
 
-  // ========= DATA LOAD =========
-  async function loadCSV(url) {
-    return new Promise((resolve, reject) => {
-      Papa.parse(url, {
-        header: true,
-        download: true,
-        skipEmptyLines: true,
-        complete: (res) => resolve(res.data || []),
-        error: reject
-      });
-    });
-  }
-
-  function validateHeaders(rows) {
-    const first = rows[0] || {};
-    const required = [...COLUMNS, AMOUNT_COLUMN];
-    const missing = required.filter(h => !(h in first));
-    if (missing.length) throw new Error("Missing columns: " + missing.join(", "));
-  }
-
-  // ========= GRAPH BUILD =========
+  // ===== Build graph =====
   function computeTopValues(rows) {
     const counts = {};
     for (const c of COLUMNS) counts[c] = new Map();
@@ -282,14 +308,14 @@
         present.push(id);
       }
 
-      // pairwise edges within the row
+      // pairwise edges within row
       for (let i=0; i<present.length; i++) {
         for (let j=i+1; j<present.length; j++) {
           const a = present[i], b = present[j];
           const [s,t] = (a < b) ? [a,b] : [b,a];
           const key = `${s}__${t}`;
           if (!edges.has(key)) {
-            edges.set(key, { data: { id:key, source:s, target:t, weight:0, amount_sum:0 } });
+            edges.set(key, { data: { id:key, source:s, target:t, weight:0, amount_sum:0, label:"" } });
           }
           const e = edges.get(key).data;
           e.weight += 1;
@@ -298,28 +324,49 @@
       }
     }
 
-    // Create computed edge labels
+    // Add readable labels
     for (const e of edges.values()) {
       e.data.label = `w=${e.data.weight}  $=${fmtMoney(e.data.amount_sum)}`;
     }
 
-    return { nodes:[...nodes.values()], edges:[...edges.values()] };
+    return { nodes: [...nodes.values()], edges: [...edges.values()] };
   }
 
-  // ========= RENDER =========
+  // ===== Layout config =====
+  function fcoseLayout({ spread }) {
+    return {
+      name: "fcose",
+      animate: true,
+      animationDuration: 900,
+      fit: true,
+      padding: 60,
+      nodeSeparation: spread ? 140 : 90,
+      idealEdgeLength: spread ? 220 : 140,
+      nodeRepulsion: spread ? 18000 : 12000,
+      gravity: 0.18,
+      packComponents: true,
+      quality: "default",
+      numIter: spread ? 2400 : 1600
+    };
+  }
+
+  function runRelayout(spread) {
+    if (!cy) return;
+    cy.stop();
+    cy.nodes().unlock();
+    cy.layout(fcoseLayout({ spread })).run();
+  }
+
+  // ===== Render =====
   function createCy(elements) {
     if (cy) cy.destroy();
 
     cy = cytoscape({
       container: $("cy"),
       elements: [...elements.nodes, ...elements.edges],
-
-      // Better multi-select UX
       boxSelectionEnabled: true,
       selectionType: "additive",
-
       style: [
-        // Nodes
         {
           selector: "node",
           style: {
@@ -334,12 +381,9 @@
             "text-outline-color": "#fff",
             "text-outline-width": 2,
             "width": 22,
-            "height": 22,
-            "border-width": 0
+            "height": 22
           }
         },
-
-        // Selected nodes (visual toggle)
         {
           selector: "node.selected",
           style: {
@@ -349,8 +393,6 @@
             "height": 26
           }
         },
-
-        // Edges
         {
           selector: "edge",
           style: {
@@ -358,8 +400,6 @@
             "opacity": 0.40,
             "line-color": "#999",
             "width": ele => Math.min(1 + ele.data("weight"), 8),
-
-            // labels
             "label": "data(label)",
             "font-size": 9,
             "color": "#111",
@@ -370,126 +410,71 @@
             "text-background-padding": 2
           }
         },
-
-        // Muted
         { selector: ".muted", style: { "opacity": 0.10 } },
-
-        // When labels are off
         { selector: ".hideEdgeLabels", style: { "label": "" } }
       ],
-
-      // Initial layout: fcose for minimal overlap
       layout: fcoseLayout({ spread: false })
     });
 
-    // Click behavior:
-    // - click node: select (single) unless shift held, then toggle in multi-select set
-    // - click background: clear selection
+    // Background click clears selection
     cy.on("tap", (evt) => {
-      if (evt.target === cy) {
-        clearSelection();
-        return;
-      }
+      if (evt.target === cy) clearSelection();
     });
 
+    // Node click selection (Shift+Click toggles)
     cy.on("tap", "node", (evt) => {
       const n = evt.target;
       const isShift = evt.originalEvent && evt.originalEvent.shiftKey;
 
       if (!isShift) {
-        // single select
         selectedNodeIds.clear();
         selectedNodeIds.add(n.id());
       } else {
-        // toggle in set
         if (selectedNodeIds.has(n.id())) selectedNodeIds.delete(n.id());
         else selectedNodeIds.add(n.id());
       }
 
       applyFocusStyles();
       updateSelectionPanel();
-
-      // center gently
       cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.15) }, { duration: 200 });
     });
 
-    // If user box-selects nodes, we treat them as selected too
+    // Box selection -> convert to our set
     cy.on("boxend", () => {
       const sels = cy.nodes(":selected");
-      if (sels.length) {
-        selectedNodeIds.clear();
-        sels.forEach(n => selectedNodeIds.add(n.id()));
-        // clear Cytoscape's native selection highlight and use ours
-        cy.nodes().unselect();
-        applyFocusStyles();
-        updateSelectionPanel();
-      }
+      if (!sels.length) return;
+      selectedNodeIds.clear();
+      sels.forEach(n => selectedNodeIds.add(n.id()));
+      cy.nodes().unselect();
+      applyFocusStyles();
+      updateSelectionPanel();
     });
 
-    // Toggle edge labels
+    // Edge label toggle
     $("edgeLabelsToggle").addEventListener("change", () => {
       if (!cy) return;
       cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
     });
-
-    // Start with labels on (if checked)
     cy.edges().toggleClass("hideEdgeLabels", !$("edgeLabelsToggle").checked);
 
+    // Initial panel
+    updateSelectionPanel();
     return cy;
   }
 
-  // fcose config
-  function fcoseLayout({ spread }) {
-    // spread=true => more spacing, slightly slower
-    return {
-      name: "fcose",
-      animate: true,
-      animationDuration: 900,
-      fit: true,
-      padding: 60,
-
-      // These reduce overlap / make it readable
-      nodeSeparation: spread ? 140 : 90,
-      idealEdgeLength: spread ? 220 : 140,
-      nodeRepulsion: spread ? 18000 : 12000,
-      gravity: 0.18,
-
-      // Collision handling
-      packComponents: true,
-      quality: "default",
-
-      // Performance
-      numIter: spread ? 2400 : 1600
-    };
-  }
-
-  function runRelayout(spread) {
-    if (!cy) return;
-    cy.stop();
-    cy.nodes().unlock();
-    cy.layout(fcoseLayout({ spread })).run();
-  }
-
-  // ========= FOCUS / MUTING =========
+  // ===== Focus / muting =====
   function applyFocusStyles() {
     if (!cy) return;
 
-    // reset classes
     cy.elements().removeClass("muted");
     cy.nodes().removeClass("selected");
 
-    // If nothing selected and no legend filter => no muting
     const hasSelection = selectedNodeIds.size > 0;
     const hasType = !!activeType;
 
     if (!hasSelection && !hasType) return;
 
-    // 1) Start muted
     cy.elements().addClass("muted");
-
-    // 2) Build a "keep visible" set:
-    // - if selection exists: union of each selected node's closed neighborhood
-    // - else: keep nodes matching the active type + incident edges
     let keep = cy.collection();
 
     if (hasSelection) {
@@ -497,39 +482,23 @@
         const n = cy.getElementById(id);
         if (n && !n.empty()) keep = keep.union(n.closedNeighborhood());
       }
-      // Mark selected nodes
       for (const id of selectedNodeIds) {
         const n = cy.getElementById(id);
         if (n && !n.empty()) n.removeClass("muted").addClass("selected");
       }
     } else if (hasType) {
       const typeNodes = cy.nodes().filter(n => n.data("type") === activeType);
-      keep = keep.union(typeNodes);
-      keep = keep.union(typeNodes.connectedEdges());
-      keep = keep.union(typeNodes.neighborhood("node")); // show immediate neighbors too
+      keep = keep.union(typeNodes).union(typeNodes.connectedEdges()).union(typeNodes.neighborhood("node"));
     }
 
-    // 3) Unmute keep
     keep.removeClass("muted");
-
-    // 4) If legend filter is active AND selection is active, also respect legend filter mildly:
-    // Keep selection neighborhood always visible, but slightly dim nodes not matching type.
-    if (hasSelection && hasType) {
-      cy.nodes().forEach(n => {
-        const inKeep = keep.contains(n);
-        if (!inKeep) return;
-        // if it's visible but not matching type, leave it visible (not muted).
-        // (You can change this to "soft dim" if you want.)
-      });
-    }
   }
 
   function clearSelection() {
     selectedNodeIds.clear();
-    if (cy) {
-      cy.nodes().removeClass("selected");
-      applyFocusStyles();
-    }
+    if (!cy) return;
+    cy.nodes().removeClass("selected");
+    applyFocusStyles();
     updateSelectionPanel();
   }
 
@@ -537,13 +506,11 @@
     activeType = null;
     document.querySelectorAll("#legend button").forEach(b => b.classList.remove("active"));
     clearSelection();
-    if (cy) {
-      cy.elements().removeClass("muted");
-    }
+    if (cy) cy.elements().removeClass("muted");
     updateSelectionPanel();
   }
 
-  // ========= SELECTION PANEL =========
+  // ===== Selection panel =====
   function updateSelectionPanel() {
     const summary = $("selSummary");
     const details = $("selDetails");
@@ -552,16 +519,18 @@
       summary.textContent = activeType ? `Type filter: ${activeType}` : "No selection";
       details.textContent = activeType
         ? "Click nodes to focus their connections (Shift+Click for multi-select)."
-        : "Click a node to see all related nodes and totals.";
+        : "Click a node to see its neighborhood and totals.";
       return;
     }
 
-    const nodes = [...selectedNodeIds].map(id => cy.getElementById(id)).filter(n => n && !n.empty());
+    const nodes = [...selectedNodeIds]
+      .map(id => cy.getElementById(id))
+      .filter(n => n && !n.empty());
+
     const hood = nodes.reduce((acc, n) => acc.union(n.closedNeighborhood()), cy.collection());
     const hoodNodes = hood.nodes();
     const hoodEdges = hood.edges();
 
-    // totals
     let edgeAmount = 0;
     let edgeWeight = 0;
     hoodEdges.forEach(e => {
@@ -571,7 +540,6 @@
 
     summary.textContent = `${nodes.length} selected • neighborhood: ${hoodNodes.length} nodes, ${hoodEdges.length} edges`;
 
-    // list related nodes (short)
     const related = hoodNodes
       .filter(n => !selectedNodeIds.has(n.id()))
       .map(n => `${n.data("label")} (${n.data("type")})`)
@@ -579,11 +547,11 @@
 
     details.innerHTML = `
       <div><b>Edge totals:</b> w=${edgeWeight} • $=${fmtMoney(edgeAmount)}</div>
-      <div style="margin-top:6px;"><b>Related:</b> ${related.length ? related.join(", ") : "—"}${hoodNodes.length - nodes.length > 12 ? " …" : ""}</div>
+      <div style="margin-top:6px;"><b>Related:</b> ${related.length ? related.join(", ") : "—"}${(hoodNodes.length - nodes.length) > 12 ? " …" : ""}</div>
     `;
   }
 
-  // ========= MAIN =========
+  // ===== Main =====
   async function main() {
     initLegend();
 
@@ -595,14 +563,18 @@
 
     if (!SHEET_CSV_URL)
     {
-      setStatus("Missing CSV");
+      setStatus("Set SHEET_CSV_URL in the code (top of <script>) to your published CSV URL.");
       return;
     }
 
     try {
       setStatus("Loading CSV…");
       const rows = await loadCSV(SHEET_CSV_URL);
-      if (!rows.length) { setStatus("No rows found in CSV."); return; }
+
+      if (!rows.length) {
+        setStatus("No rows found in CSV.");
+        return;
+      }
 
       validateHeaders(rows);
 
@@ -614,7 +586,6 @@
 
       setStatus("Rendering…");
       createCy(elements);
-      updateSelectionPanel();
 
       setStatus(`Loaded ${rows.length} rows • top ${TOP_N}/category • click nodes to explore`);
     } catch (e) {
