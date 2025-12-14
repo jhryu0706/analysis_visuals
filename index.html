@@ -593,8 +593,9 @@
     $("clearSelBtn").addEventListener("click", clearSelection);
     $("resetBtn").addEventListener("click", resetAll);
 
-    if (!SHEET_CSV_URL || SHEET_CSV_URL.includes("https://docs.google.com/spreadsheets/d/e/2PACX-1vQITmhFpwJgwfuSQFnAzUANUOB65EHTXydhXAc62IM5H-NUGhcmo-5vI9Md6-HFf2gzIYXurbqPw0tJ/pub?output=csv")) {
-      setStatus("Paste your published Google Sheets CSV URL into SHEET_CSV_URL in index.html.");
+    if (!SHEET_CSV_URL)
+    {
+      setStatus("Missing CSV");
       return;
     }
 
